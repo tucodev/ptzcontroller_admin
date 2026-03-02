@@ -16,18 +16,22 @@
 
 | 소프트웨어 | 버전        | 용도          |
 | ---------- | ----------- | ------------- |
-| Node.js    | 18.x 이상   | 런타임        |
+| Node.js    | 24.x 이상   | 런타임        |
 | Yarn       | 1.22.x 이상 | 패키지 매니저 |
 | Git        | 2.x 이상    | 버전 관리     |
+
+node 18 이상인데 우리는 24.x 를 쓸 것임
 
 ### Node.js 설치
 
 ```bash
 # Windows (winget)
 winget install OpenJS.NodeJS.LTS
+or
+nvm install 24
 
 # macOS (Homebrew)
-brew install node@18
+brew install node@24
 
 # Ubuntu/Debian
 curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
@@ -48,7 +52,7 @@ npm install -g yarn
 
 ```bash
 # 프로젝트 디렉토리로 이동
-cd ptz_controller/nextjs_space
+cd ptzcontroller_admin
 
 # 의존성 설치
 yarn install
@@ -254,7 +258,12 @@ cp .env.example .env
 
 ```env
 # 데이터베이스 URL
-DATABASE_URL="postgresql://user:password@localhost:5432/ptz_controller"
+DATABASE_URL="postgresql://user:password@localhost:5432/ptz_controller"  <-- 이런 형식임
+
+나의 것 example
+DATABASE_URL="postgresql://username:password@ep-patient-waterfall-a1tk4pzw-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+username
+password 는 .env에 있음
 
 # NextAuth 설정
 NEXTAUTH_URL="http://localhost:3000"

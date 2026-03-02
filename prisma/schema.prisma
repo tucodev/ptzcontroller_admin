@@ -3,7 +3,7 @@ generator client {
     binaryTargets = ["native", "windows", "linux-musl-arm64-openssl-3.0.x"]
         // output 항목이 있다면 제거하거나 아래처럼 수정 tuco remove
         // output = "../../../home/ubuntu/..."  ← 이 줄이 문제를 일으킴(리눅스외 OS시) 는
-        // output = "/home/ubuntu/ptz_controller/nextjs_space/node_modules/.prisma/client"
+        // output = "/home/ubuntu/ptz_controller/ptzcontroller_admin/node_modules/.prisma/client"
 }
 
 datasource db {

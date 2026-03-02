@@ -1,6 +1,6 @@
 # cloudtype.yaml
 name: ptz-controller
-app: nextjs_space
+app: ptzcontroller_admin
 
 services:
     - name: web

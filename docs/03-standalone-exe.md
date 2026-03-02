@@ -50,7 +50,7 @@ Node.js 20+ 에서 공식 지원하는 단일 실행 파일 생성 기능입니�
 
 ```bash
 # next.config.js에 output: 'standalone' 설정 필요
-cd nextjs_space
+cd ptzcontroller_admin
 yarn build
 ```
 
@@ -132,16 +132,16 @@ REM build-sea.bat
 echo === Building PTZ Controller SEA ===
 
 REM 1. Next.js 빌드
-cd nextjs_space
+cd ptzcontroller_admin
 call yarn build
 cd ..
 
 REM 2. 배포 폴더 준비
 mkdir dist\sea 2>nul
-xcopy /E /I /Y nextjs_space\.next\standalone dist\sea\standalone
-xcopy /E /I /Y nextjs_space\.next\static dist\sea\standalone\.next\static
-xcopy /E /I /Y nextjs_space\public dist\sea\standalone\public
-xcopy /E /I /Y nextjs_space\data dist\sea\standalone\data
+xcopy /E /I /Y ptzcontroller_admin\.next\standalone dist\sea\standalone
+xcopy /E /I /Y ptzcontroller_admin\.next\static dist\sea\standalone\.next\static
+xcopy /E /I /Y ptzcontroller_admin\public dist\sea\standalone\public
+xcopy /E /I /Y ptzcontroller_admin\data dist\sea\standalone\data
 
 REM 3. SEA 진입점 복사
 copy sea-entry.js dist\sea\
@@ -312,11 +312,11 @@ nexe server.js -o ptz-controller.exe
 ### 프로젝트 구조
 
 ```
-ptz-controller-desktop/
+ptzcontroller-desktop/
 ├── electron/
 │   ├── main.js          # Electron 메인 프로세스
 │   └── preload.js       # 프리로드 스크립트
-├── nextjs_space/        # Next.js 앱 (기존 코드)
+├── ptzcontroller_admin/        # Next.js 앱 (기존 코드)
 ├── package.json
 └── forge.config.js      # Electron Forge 설정
 ```
@@ -335,11 +335,11 @@ let serverProcess;
 const PORT = 3000;
 
 function startServer() {
-  const serverPath = path.join(__dirname, '..', 'nextjs_space', '.next', 'standalone', 'server.js');
+  const serverPath = path.join(__dirname, '..', 'ptzcontroller_admin', '.next', 'standalone', 'server.js');
   
   serverProcess = spawn('node', [serverPath], {
     env: { ...process.env, PORT: PORT.toString() },
-    cwd: path.join(__dirname, '..', 'nextjs_space', '.next', 'standalone')
+    cwd: path.join(__dirname, '..', 'ptzcontroller_admin', '.next', 'standalone')
   });
 
   serverProcess.stdout.on('data', (data) => {
@@ -360,7 +360,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true
     },
-    icon: path.join(__dirname, '..', 'nextjs_space', 'public', 'favicon.svg'),
+    icon: path.join(__dirname, '..', 'ptzcontroller_admin', 'public', 'favicon.svg'),
     title: 'PTZ Controller'
   });
 
@@ -407,7 +407,7 @@ app.on('window-all-closed', () => {
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
-    "build:next": "cd nextjs_space && yarn build",
+    "build:next": "cd ptzcontroller_admin && yarn build",
     "package": "electron-forge package",
     "make": "electron-forge make"
   },
@@ -427,14 +427,14 @@ app.on('window-all-closed', () => {
 module.exports = {
   packagerConfig: {
     asar: true,
-    icon: './nextjs_space/public/favicon',
+    icon: './ptzcontroller_admin/public/favicon',
     name: 'PTZ Controller'
   },
   makers: [
     {
       name: '@electron-forge/maker-squirrel',
       config: {
-        name: 'ptz_controller'
+        name: 'PTZController'
       }
     },
     {
@@ -449,7 +449,7 @@ module.exports = {
 
 ```bash
 # 1. Next.js 빌드
-cd nextjs_space
+cd ptzcontroller_admin
 yarn build
 
 # 2. Electron 앱 패키징
@@ -475,7 +475,7 @@ REM build-portable.bat
 echo Building PTZ Controller...
 
 REM 1. Next.js 빌드
-cd nextjs_space
+cd ptzcontroller_admin
 call yarn build
 cd ..
 
@@ -484,10 +484,10 @@ set DIST_DIR=dist\ptz-controller-portable
 mkdir %DIST_DIR%
 
 REM 3. standalone 복사
-xcopy /E /I nextjs_space\.next\standalone %DIST_DIR%\app
-xcopy /E /I nextjs_space\.next\static %DIST_DIR%\app\.next\static
-xcopy /E /I nextjs_space\public %DIST_DIR%\app\public
-xcopy /E /I nextjs_space\data %DIST_DIR%\app\data
+xcopy /E /I ptzcontroller_admin\.next\standalone %DIST_DIR%\app
+xcopy /E /I ptzcontroller_admin\.next\static %DIST_DIR%\app\.next\static
+xcopy /E /I ptzcontroller_admin\public %DIST_DIR%\app\public
+xcopy /E /I ptzcontroller_admin\data %DIST_DIR%\app\data
 
 REM 4. Node.js 포터블 복사 (다운로드 필요)
 REM https://nodejs.org/dist/에서 node-vXX.X.X-win-x64.zip 다운로드

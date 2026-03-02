@@ -13,6 +13,20 @@
 
 ---
 
+## 주의
+
+```
+cloudtype에 배포전에 database 가 구성되어 있어야 함.
+local 에서 다음을 실행할 것.
+
+yarn install
+yarn prisma generate
+yarn prisma migrate dev
+yarn prisma db seed
+```
+
+
+
 ## 개요
 
 [Cloudtype](https://cloudtype.io)은 한국 기반 클라우드 플랫폼으로, Next.js 애플리케이션을 쉽게 배포할 수 있습니다.
@@ -39,7 +53,7 @@
 
 ```bash
 # 로컬에서 Git 초기화
-cd ptz_controller
+cd ptzcontroller_admin
 git init
 git add .
 git commit -m "Initial commit"
@@ -52,8 +66,8 @@ git push -u origin main
 ### 3. 필수 파일 확인
 
 ```
-ptz_controller/
-├── nextjs_space/
+project_root/
+├── ptzcontroller_admin/
 │   ├── package.json      # ✅ 필수
 │   ├── next.config.js    # ✅ 필수
 │   ├── prisma/
@@ -108,13 +122,15 @@ module.exports = nextConfig;
     "version": "1.0.0",
     "scripts": {
         "dev": "next dev",
-        "build": "next build",
-        "build-cloudtype": "prisma generate && next build", // <--- tuco add, cloude type build command 에 build-cloudtype 이라고 입력한다.
+        "build": "prisma generate && next build",
+        "build-cloudtype": "prisma generate && next build",
+        "rebuild": "next build",
         "start": "next start",
-        "postinstall": "prisma generate"
+        "lint": "next lint"
+        //"postinstall": "prisma generate"
     },
     "engines": {
-        "node": ">=18.0.0"
+        "node": ">=24.0.0"
     }
 }
 ```
@@ -157,7 +173,7 @@ node_modules/
 | Node.js 버전  | 18.x                   |
 | 빌드 명령어   | `yarn build-cloudtype` |
 | 시작 명령어   | `yarn start`           |
-| 루트 디렉토리 | `nextjs_space`         |
+| 루트 디렉토리 | `ptzcontroller_admin`  |
 | 포트          | 3000                   |
 
 ### 3. cloudtype.yaml 설정 (선택)
@@ -167,12 +183,12 @@ node_modules/
 ```yaml
 # cloudtype.yaml
 name: ptz-controller
-app: nextjs_space
+app: ptzcontroller_admin
 
 services:
     - name: web
       type: nextjs
-      node: 18
+      node: 24
       build:
           command: yarn build-cloudtype
       start:
@@ -191,7 +207,7 @@ services:
 ```
 # cloudtype.yaml
 name: ptz-controller
-app: nextjs_space
+app: ptzcontroller_admin
 
 services:
     - name: web
