@@ -1,0 +1,18 @@
+# cloudtype.yaml
+name: ptz-controller
+app: nextjs_space
+
+services:
+    - name: web
+      type: nextjs
+      node: 18
+      build:
+          command: yarn build-cloudtype
+      start:
+          command: yarn start
+      env:
+          - DATABASE_URL
+          - NEXTAUTH_SECRET
+      resources:
+          cpu: 0.5
+          memory: 512Mi
