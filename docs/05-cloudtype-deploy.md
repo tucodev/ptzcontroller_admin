@@ -25,7 +25,15 @@ yarn prisma migrate dev
 yarn prisma db seed
 ```
 
+## CloudType 설정
 
+<center>
+  <img
+    src="./cloudtype-setup.png"
+    width="680"
+    height="2164"
+  />
+</center>
 
 ## 개요
 
