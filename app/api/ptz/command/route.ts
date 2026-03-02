@@ -1,19 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { requireSession } from '@/lib/auth-utils';
 import { ProtocolFactory } from '@/lib/protocols/protocol-factory';
 import { getCamera } from '@/lib/config-manager';
 import { PTZCommand } from '@/lib/types';
 
 export async function POST(request: NextRequest) {
-  try {
-    const session = await getServerSession(authOptions);
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  const { error } = await requireSession();
+  if (error) return error;
 
-    const body = await request.json();
-    const { cameraId, command } = body ?? {};
+  try {
+    const { cameraId, command } = await request.json() ?? {};
 
     if (!cameraId || !command) {
       return NextResponse.json(
@@ -24,44 +20,42 @@ export async function POST(request: NextRequest) {
 
     const camera = getCamera(cameraId);
     if (!camera) {
-      return NextResponse.json(
-        { error: 'Camera not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: 'Camera not found' }, { status: 404 });
     }
 
-    // For proxy mode, return the command packet for client-side handling
-    if (camera?.operationMode === 'proxy') {
+    // ─── Proxy 모드 ────────────────────────────────────────
+    // 서버에서 패킷만 생성하고, 실제 전송은 클라이언트(WebSocket)가 담당
+    if (camera.operationMode === 'proxy') {
       const protocol = ProtocolFactory.createProtocol(camera);
-      const packet = (protocol as { generatePacket?: (cmd: PTZCommand) => number[] | null })?.generatePacket?.(command);
+      const packet = (protocol as { generatePacket?: (cmd: PTZCommand) => number[] | null })
+        .generatePacket?.(command) ?? null;
       return NextResponse.json({
         success: true,
         mode: 'proxy',
         packet,
-        proxyUrl: camera?.proxyUrl,
+        proxyUrl: camera.proxyUrl,
       });
     }
 
-    // Direct mode - send command directly
+    // ─── Direct 모드 ───────────────────────────────────────
+    // 서버가 직접 TCP 소켓으로 카메라에 명령 전송
+    // 연결이 끊어진 경우 자동 재연결 시도
     const protocol = ProtocolFactory.getOrCreateProtocol(camera);
-    
-    if (!protocol?.isConnected?.()) {
-      const connectResult = await protocol?.connect?.();
-      if (!connectResult?.success) {
+
+    if (!protocol.isConnected()) {
+      const connectResult = await protocol.connect();
+      if (!connectResult.success) {
         return NextResponse.json(
-          { error: connectResult?.message ?? 'Failed to connect' },
+          { error: connectResult.message ?? 'Failed to connect' },
           { status: 500 }
         );
       }
     }
 
-    const result = await protocol?.sendCommand?.(command);
+    const result = await protocol.sendCommand(command);
     return NextResponse.json(result);
-  } catch (error) {
-    console.error('PTZ command error:', error);
-    return NextResponse.json(
-      { error: 'Failed to send command' },
-      { status: 500 }
-    );
+  } catch (err) {
+    console.error('PTZ command error:', err);
+    return NextResponse.json({ error: 'Failed to send command' }, { status: 500 });
   }
 }

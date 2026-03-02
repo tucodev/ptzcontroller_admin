@@ -15,6 +15,7 @@ import {
   Crosshair,
   Maximize2,
   Minimize2,
+  Zap,
 } from 'lucide-react';
 import { CameraConfig, PTZCommand } from '@/lib/types';
 
@@ -24,18 +25,89 @@ interface PTZControlPanelProps {
   onCommand: (command: PTZCommand) => void;
 }
 
+// ─────────────────────────────────────────────────────────
+// Custom Function 버튼 정의
+//   추후 이 배열에 항목을 추가하면 UI 에 버튼이 자동 생성됨
+//   각 항목의 action 함수에 실제 기능을 구현할 것
+//
+// TODO: 각 버튼의 구체적 동작 구현 필요
+//   - onvif 프리셋 이름 조회
+//   - 자동 포커스(AF) 트리거
+//   - 와이퍼 제어
+//   - 조명 제어
+//   - 기타 장비 특화 기능
+// ─────────────────────────────────────────────────────────
+interface CustomFunctionDef {
+  key: string;       // 버튼 고유 키
+  label: string;     // 버튼 표시 라벨 (F1, F2 …)
+  title?: string;    // 툴팁 텍스트
+  /** 버튼 클릭 시 실행할 함수 */
+  // TODO: 구현 시 (connected: boolean, camera: CameraConfig, onCommand: ...) 을 인자로 받도록 수정
+  action: (connected: boolean, camera: CameraConfig, onCommand: (cmd: PTZCommand) => void) => void;
+}
+
+const CUSTOM_FUNCTIONS: CustomFunctionDef[] = [
+  {
+    key: 'f1',
+    label: 'F1',
+    title: '사용자 정의 기능 1',
+    action: (connected, camera, _onCommand) => {
+      // TODO: F1 기능 구현
+      //   예시: 자동 포커스 트리거
+      //   if (connected) onCommand({ action: 'focus', direction: 'near', speed: 100 });
+      console.log('[CustomFn] F1 clicked, connected:', connected, 'camera:', camera.name);
+    },
+  },
+  {
+    key: 'f2',
+    label: 'F2',
+    title: '사용자 정의 기능 2',
+    action: (connected, camera, _onCommand) => {
+      // TODO: F2 기능 구현
+      console.log('[CustomFn] F2 clicked, connected:', connected, 'camera:', camera.name);
+    },
+  },
+  {
+    key: 'f3',
+    label: 'F3',
+    title: '사용자 정의 기능 3',
+    action: (connected, camera, _onCommand) => {
+      // TODO: F3 기능 구현
+      console.log('[CustomFn] F3 clicked, connected:', connected, 'camera:', camera.name);
+    },
+  },
+  {
+    key: 'f4',
+    label: 'F4',
+    title: '사용자 정의 기능 4',
+    action: (connected, camera, _onCommand) => {
+      // TODO: F4 기능 구현
+      console.log('[CustomFn] F4 clicked, connected:', connected, 'camera:', camera.name);
+    },
+  },
+  {
+    key: 'f5',
+    label: 'F5',
+    title: '사용자 정의 기능 5',
+    action: (connected, camera, _onCommand) => {
+      // TODO: F5 기능 구현
+      console.log('[CustomFn] F5 clicked, connected:', connected, 'camera:', camera.name);
+    },
+  },
+];
+
 export default function PTZControlPanel({
   camera,
   connected,
   onCommand,
 }: PTZControlPanelProps) {
-  const [speed, setSpeed] = useState(50);
-  const [zoomSpeed, setZoomSpeed] = useState(50);
+  const [speed, setSpeed]           = useState(50);
+  const [zoomSpeed, setZoomSpeed]   = useState(50);
   const [focusSpeed, setFocusSpeed] = useState(50);
   const [presetInput, setPresetInput] = useState('1');
   const activeCommandRef = useRef<string | null>(null);
 
-  // Stop command when mouse/touch is released
+  // ─── 마우스/터치 릴리즈 시 Stop 전송 ─────────────────────
   const handleStop = useCallback(() => {
     if (activeCommandRef.current) {
       onCommand({ action: 'stop' });
@@ -43,14 +115,14 @@ export default function PTZControlPanel({
     }
   }, [onCommand]);
 
-  // Add global event listeners for mouse up
+  // window 전체에 mouseup/touchend 리스너 등록
+  // (버튼 밖에서 손을 떼도 stop 이 전송되도록)
   useEffect(() => {
-    const handleGlobalUp = () => handleStop();
-    window.addEventListener('mouseup', handleGlobalUp);
-    window.addEventListener('touchend', handleGlobalUp);
+    window.addEventListener('mouseup',  handleStop);
+    window.addEventListener('touchend', handleStop);
     return () => {
-      window.removeEventListener('mouseup', handleGlobalUp);
-      window.removeEventListener('touchend', handleGlobalUp);
+      window.removeEventListener('mouseup',  handleStop);
+      window.removeEventListener('touchend', handleStop);
     };
   }, [handleStop]);
 
@@ -80,6 +152,7 @@ export default function PTZControlPanel({
     }
   };
 
+  // ─── 공통 컨트롤 버튼 컴포넌트 ───────────────────────────
   const ControlButton = ({
     children,
     onAction,
@@ -108,11 +181,8 @@ export default function PTZControlPanel({
         <div>
           <label className="block text-sm text-muted-foreground mb-2">Pan/Tilt Speed</label>
           <input
-            type="range"
-            min="1"
-            max="100"
-            value={speed}
-            onChange={(e) => setSpeed(parseInt(e?.target?.value ?? '50', 10))}
+            type="range" min="1" max="100" value={speed}
+            onChange={(e) => setSpeed(parseInt(e.target.value, 10))}
             className="w-full"
           />
           <div className="text-center text-sm text-muted-foreground mt-1">{speed}%</div>
@@ -120,11 +190,8 @@ export default function PTZControlPanel({
         <div>
           <label className="block text-sm text-muted-foreground mb-2">Zoom Speed</label>
           <input
-            type="range"
-            min="1"
-            max="100"
-            value={zoomSpeed}
-            onChange={(e) => setZoomSpeed(parseInt(e?.target?.value ?? '50', 10))}
+            type="range" min="1" max="100" value={zoomSpeed}
+            onChange={(e) => setZoomSpeed(parseInt(e.target.value, 10))}
             className="w-full"
           />
           <div className="text-center text-sm text-muted-foreground mt-1">{zoomSpeed}%</div>
@@ -132,11 +199,8 @@ export default function PTZControlPanel({
         <div>
           <label className="block text-sm text-muted-foreground mb-2">Focus Speed</label>
           <input
-            type="range"
-            min="1"
-            max="100"
-            value={focusSpeed}
-            onChange={(e) => setFocusSpeed(parseInt(e?.target?.value ?? '50', 10))}
+            type="range" min="1" max="100" value={focusSpeed}
+            onChange={(e) => setFocusSpeed(parseInt(e.target.value, 10))}
             className="w-full"
           />
           <div className="text-center text-sm text-muted-foreground mt-1">{focusSpeed}%</div>
@@ -144,7 +208,7 @@ export default function PTZControlPanel({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* PTZ Joystick */}
+        {/* Pan / Tilt Joystick */}
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -154,26 +218,18 @@ export default function PTZControlPanel({
             <Crosshair className="w-4 h-4" />
             Pan / Tilt Control
           </h3>
-          
+
           <div className="flex flex-col items-center gap-2">
-            {/* Up */}
-            <ControlButton
-              onAction={() => handlePTZ('tilt', 'up')}
-              disabled={!connected}
-            >
+            <ControlButton onAction={() => handlePTZ('tilt', 'up')} disabled={!connected}>
               <ArrowUp className="w-6 h-6" />
             </ControlButton>
 
             <div className="flex items-center gap-2">
-              {/* Left */}
-              <ControlButton
-                onAction={() => handlePTZ('pan', 'left')}
-                disabled={!connected}
-              >
+              <ControlButton onAction={() => handlePTZ('pan', 'left')} disabled={!connected}>
                 <ArrowLeft className="w-6 h-6" />
               </ControlButton>
 
-              {/* Stop / Home */}
+              {/* Stop 버튼 */}
               <button
                 onClick={() => onCommand({ action: 'stop' })}
                 disabled={!connected}
@@ -182,20 +238,12 @@ export default function PTZControlPanel({
                 <Square className="w-6 h-6" />
               </button>
 
-              {/* Right */}
-              <ControlButton
-                onAction={() => handlePTZ('pan', 'right')}
-                disabled={!connected}
-              >
+              <ControlButton onAction={() => handlePTZ('pan', 'right')} disabled={!connected}>
                 <ArrowRight className="w-6 h-6" />
               </ControlButton>
             </div>
 
-            {/* Down */}
-            <ControlButton
-              onAction={() => handlePTZ('tilt', 'down')}
-              disabled={!connected}
-            >
+            <ControlButton onAction={() => handlePTZ('tilt', 'down')} disabled={!connected}>
               <ArrowDown className="w-6 h-6" />
             </ControlButton>
           </div>
@@ -216,23 +264,19 @@ export default function PTZControlPanel({
             </h3>
             <div className="flex justify-center gap-4">
               <ControlButton
-                onAction={() => handleZoom('out')}
-                disabled={!connected}
+                onAction={() => handleZoom('out')} disabled={!connected}
                 className="flex-1 max-w-[120px]"
               >
                 <div className="flex items-center justify-center gap-2">
-                  <ZoomOut className="w-5 h-5" />
-                  <span className="text-sm">Out</span>
+                  <ZoomOut className="w-5 h-5" /><span className="text-sm">Out</span>
                 </div>
               </ControlButton>
               <ControlButton
-                onAction={() => handleZoom('in')}
-                disabled={!connected}
-                className="flex-1 max-w-[120px] bg-green-600/30 hover:bg-green-600/50 dark:bg-green-600/30 dark:hover:bg-green-600/50"
+                onAction={() => handleZoom('in')} disabled={!connected}
+                className="flex-1 max-w-[120px] bg-green-600/30 hover:bg-green-600/50"
               >
                 <div className="flex items-center justify-center gap-2">
-                  <ZoomIn className="w-5 h-5" />
-                  <span className="text-sm">In</span>
+                  <ZoomIn className="w-5 h-5" /><span className="text-sm">In</span>
                 </div>
               </ControlButton>
             </div>
@@ -246,23 +290,19 @@ export default function PTZControlPanel({
             </h3>
             <div className="flex justify-center gap-4">
               <ControlButton
-                onAction={() => handleFocus('near')}
-                disabled={!connected}
+                onAction={() => handleFocus('near')} disabled={!connected}
                 className="flex-1 max-w-[120px]"
               >
                 <div className="flex items-center justify-center gap-2">
-                  <Minimize2 className="w-5 h-5" />
-                  <span className="text-sm">Near</span>
+                  <Minimize2 className="w-5 h-5" /><span className="text-sm">Near</span>
                 </div>
               </ControlButton>
               <ControlButton
-                onAction={() => handleFocus('far')}
-                disabled={!connected}
-                className="flex-1 max-w-[120px] bg-purple-600/30 hover:bg-purple-600/50 dark:bg-purple-600/30 dark:hover:bg-purple-600/50"
+                onAction={() => handleFocus('far')} disabled={!connected}
+                className="flex-1 max-w-[120px] bg-purple-600/30 hover:bg-purple-600/50"
               >
                 <div className="flex items-center justify-center gap-2">
-                  <Maximize2 className="w-5 h-5" />
-                  <span className="text-sm">Far</span>
+                  <Maximize2 className="w-5 h-5" /><span className="text-sm">Far</span>
                 </div>
               </ControlButton>
             </div>
@@ -282,30 +322,23 @@ export default function PTZControlPanel({
           Presets
         </h3>
         <div className="flex flex-wrap gap-2 items-center">
-          {/* Quick presets */}
+          {/* 빠른 프리셋 버튼 1~6 */}
           {[1, 2, 3, 4, 5, 6].map((num) => (
             <button
               key={num}
-              onClick={() => {
-                if (connected) {
-                  onCommand({ action: 'preset', presetNumber: num });
-                }
-              }}
+              onClick={() => connected && onCommand({ action: 'preset', presetNumber: num })}
               disabled={!connected}
               className="w-12 h-12 bg-muted hover:bg-primary/50 disabled:opacity-50 rounded-lg transition-all font-medium"
             >
               {num}
             </button>
           ))}
-          
-          {/* Custom preset input */}
+
+          {/* 직접 번호 입력 프리셋 */}
           <div className="flex items-center gap-2 ml-4">
             <input
-              type="number"
-              min="1"
-              max="255"
-              value={presetInput}
-              onChange={(e) => setPresetInput(e?.target?.value ?? '1')}
+              type="number" min="1" max="255" value={presetInput}
+              onChange={(e) => setPresetInput(e.target.value)}
               className="w-20 px-3 py-2 bg-muted border border-border rounded-lg text-center"
               placeholder="#"
             />
@@ -320,7 +353,10 @@ export default function PTZControlPanel({
         </div>
       </motion.div>
 
-      {/* Custom Buttons */}
+      {/* ─── Custom Functions ───────────────────────────────────
+          추후 기능 추가 예정 버튼 영역
+          CUSTOM_FUNCTIONS 배열에 항목 추가 후 action 함수를 구현할 것
+          ─────────────────────────────────────────────────────── */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -328,33 +364,32 @@ export default function PTZControlPanel({
         className="bg-muted/30 rounded-2xl p-6"
       >
         <h3 className="text-sm font-medium text-muted-foreground mb-4 flex items-center gap-2">
-          <Square className="w-4 h-4" />
+          <Zap className="w-4 h-4" />
           Custom Functions
         </h3>
         <div className="grid grid-cols-5 gap-3">
-          {[1, 2, 3, 4, 5].map((num) => (
+          {CUSTOM_FUNCTIONS.map((fn) => (
             <button
-              key={num}
-              onClick={() => {
-                // TODO: 커스텀 기능 구현
-                console.log(`Custom button ${num} clicked`);
-              }}
+              key={fn.key}
+              title={fn.title}
+              onClick={() => fn.action(connected, camera, onCommand)}
               className="h-12 bg-muted hover:bg-amber-500/30 border border-border hover:border-amber-500/50 rounded-lg transition-all font-medium text-sm"
             >
-              F{num}
+              {fn.label}
             </button>
           ))}
         </div>
         <p className="text-xs text-muted-foreground mt-3">
-          사용자 정의 기능을 위한 버튼입니다. (추후 기능 추가 예정)
+          {/* TODO: 각 버튼 라벨/툴팁은 CUSTOM_FUNCTIONS 배열에서 관리 */}
+          사용자 정의 기능 버튼 — CUSTOM_FUNCTIONS 배열에 action 구현 후 활성화
         </p>
       </motion.div>
 
       {/* Camera Info */}
       <div className="text-xs text-muted-foreground space-y-1">
-        <p>Protocol: {camera?.protocol?.toUpperCase?.() ?? 'Unknown'} | Mode: {camera?.operationMode === 'proxy' ? 'Proxy' : 'Direct'}</p>
-        {camera?.host && <p>Host: {camera.host}:{camera?.port ?? 'N/A'}</p>}
-        {camera?.address !== undefined && <p>Address: {camera.address}</p>}
+        <p>Protocol: {camera.protocol?.toUpperCase() ?? 'Unknown'} | Mode: {camera.operationMode === 'proxy' ? 'Proxy' : 'Direct'}</p>
+        {camera.host && <p>Host: {camera.host}:{camera.port ?? 'N/A'}</p>}
+        {camera.address !== undefined && <p>Address: {camera.address}</p>}
       </div>
     </div>
   );

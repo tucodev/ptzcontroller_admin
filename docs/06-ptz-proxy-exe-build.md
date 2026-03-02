@@ -1,76 +1,136 @@
 # PTZ Proxy EXE 빌드 가이드
 
-PTZ Proxy를 독립 실행 파일(EXE)로 빌드하는 방법을 설명합니다.
+PTZ Proxy를 독립 실행 파일(EXE)로 빌드하는 방법을 설명합니다.  
+Node.js가 없는 PC에서도 바로 실행 가능한 배포 파일을 만들 수 있습니다.
 
-## 개요
+---
 
-pkg를 사용하여 Node.js 애플리케이션을 단일 실행 파일로 패키징합니다.
-이렇게 하면 Node.js가 설치되지 않은 PC에서도 PTZ Proxy를 실행할 수 있습니다.
+## 방법 1: ptz-proxy-electron 빌드 (권장)
 
-## 사전 요구사항
+`ptz-proxy-electron/` 프로젝트를 electron-builder로 패키징합니다.  
+GUI + 트레이 아이콘이 포함된 완성형 앱을 만듭니다.
 
-- Node.js 18.x 이상
-- npm 또는 yarn
-- 인터넷 연결 (pkg 다운로드용)
+### 사전 준비
 
-## 빌드 방법
+- Node.js 18+
+- `assets/icon.ico`, `assets/icon.png` 배치 (256×256 이상)
 
-### 방법 1: 빌드 스크립트 사용 (권장)
+### 빌드 방법
 
-#### Windows
-```batch
+**방법 A: 배치 파일 사용 (권장)**
+
+```
+build-electron.bat   ← 더블클릭
+```
+
+**방법 B: 수동**
+
+```bash
+cd ptz-proxy-electron
+npm install
+npm run build       # electron-builder --win --x64
+```
+
+### 빌드 결과물 (`dist/` 폴더)
+
+| 파일 | 설명 |
+|------|------|
+| `PTZ Proxy Setup 1.0.1.exe` | 설치 프로그램 (시작 메뉴·바탕화면 등록) |
+| `PTZ-Proxy-Portable-1.0.1.exe` | Portable — 설치 없이 바로 실행 |
+
+### `package.json` 빌드 설정 요약
+
+```json
+{
+  "build": {
+    "appId": "com.ptz.proxy",
+    "productName": "PTZ Proxy",
+    "win": {
+      "target": [
+        { "target": "nsis",     "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "PTZ Proxy"
+    },
+    "portable": {
+      "artifactName": "PTZ-Proxy-Portable-${version}.exe"
+    }
+  }
+}
+```
+
+---
+
+## 방법 2: ptz-proxy 소스를 pkg로 EXE 빌드
+
+웹앱 다운로드 팝업에서 받은 ZIP의 소스를 Node.js 없이 실행 가능한 단일 EXE로 빌드합니다.
+
+### 사전 요구사항
+
+- Node.js 18+ 및 npm
+
+### ZIP 다운로드
+
+웹앱에서 Proxy 연결 실패 팝업 → **"소스 코드 (ZIP)"** 다운로드  
+또는: `/api/download/ptz-proxy` 직접 접근
+
+### 빌드 방법
+
+**방법 A: 빌드 스크립트 사용 (권장)**
+
+```bat
 cd ptz-proxy-standalone
 build-exe.bat
 ```
 
-#### Linux/Mac
+또는 Linux/Mac:
+
 ```bash
 cd ptz-proxy-standalone
 chmod +x build-exe.sh
 ./build-exe.sh
 ```
 
-### 방법 2: 수동 빌드
+**방법 B: 수동 빌드**
 
 ```bash
-# 1. 의존성 설치
 cd ptz-proxy-standalone
+
+# 의존성 설치
 npm install
 
-# 2. pkg 전역 설치
+# pkg 전역 설치
 npm install -g pkg
 
-# 3. Windows EXE 빌드
+# Windows EXE
 npx pkg ptz-proxy.js --targets node18-win-x64 --output dist/ptz-proxy.exe
 
-# 4. Linux 빌드
+# Linux
 npx pkg ptz-proxy.js --targets node18-linux-x64 --output dist/ptz-proxy-linux
 
-# 5. macOS 빌드
+# macOS
 npx pkg ptz-proxy.js --targets node18-macos-x64 --output dist/ptz-proxy-macos
 ```
 
-### 방법 3: node 스크립트 사용
+### 빌드 결과물 (`dist/` 폴더)
 
-```bash
-cd ptz-proxy-standalone
-node build-installer.js
-```
-
-## 빌드 결과물
-
-빌드가 완료되면 `dist/` 디렉토리에 실행 파일이 생성됩니다:
-
-| 파일명 | 플랫폼 | 설명 |
+| 파일명 | 플랫폼 | 크기 |
 |--------|--------|------|
-| `ptz-proxy.exe` | Windows | Windows 64-bit 실행 파일 |
-| `ptz-proxy-linux` | Linux | Linux 64-bit 바이너리 |
-| `ptz-proxy-macos` | macOS | macOS 64-bit 바이너리 |
+| `ptz-proxy.exe` | Windows x64 | ~40–50 MB |
+| `ptz-proxy-linux` | Linux x64 | ~40–50 MB |
+| `ptz-proxy-macos` | macOS x64 | ~40–50 MB |
 
-## EXE 사용법
+> Node.js 런타임이 내장되어 파일 크기가 큽니다. 압축 시 약 15–20 MB.
 
-### Windows
-```batch
+### EXE 사용법
+
+```bat
 # 기본 포트 (9902)
 ptz-proxy.exe
 
@@ -78,73 +138,75 @@ ptz-proxy.exe
 ptz-proxy.exe 8765
 ```
 
-### Linux/Mac
-```bash
-# 실행 권한 부여
-chmod +x ptz-proxy-linux
+Linux/Mac:
 
-# 실행
+```bash
+chmod +x ptz-proxy-linux
 ./ptz-proxy-linux
 ./ptz-proxy-linux 8765
 ```
 
-## 배포 방법
+---
 
-### 1. 직접 배포
-생성된 EXE 파일을 USB나 네트워크를 통해 배포합니다.
+## 빌드된 EXE를 웹앱 다운로드 팝업에 연결
 
-### 2. Windows 인스톨러 생성 (선택사항)
+빌드된 EXE를 관리자 페이지를 통해 사용자에게 배포합니다.
 
-Inno Setup을 사용하여 설치 프로그램을 만들 수 있습니다:
+### 방법: 관리자 페이지 업로드
 
-```iss
-; ptz-proxy-setup.iss
-[Setup]
-AppName=PTZ Proxy
-AppVersion=1.0.1
-DefaultDirName={pf}\PTZ Proxy
-DefaultGroupName=PTZ Proxy
-OutputDir=installer
-OutputBaseFilename=ptz-proxy-setup
+1. admin 계정으로 웹앱 로그인
+2. 헤더의 🛡️ 버튼 클릭
+3. **"Proxy 파일"** 탭 선택
+4. 빌드된 파일 업로드 (`ptz-proxy-setup.exe` 등)
+5. 이후 사용자 Proxy 연결 실패 팝업에 자동으로 다운로드 링크 표시
 
-[Files]
-Source: "dist\ptz-proxy.exe"; DestDir: "{app}"
+**업로드 가능 형식**: `.exe`, `.zip`, `.msi`, `.dmg`, `.sh`, `.bat`, `.appimage`  
+**저장 위치**: `ptzcontroller_admin/public/downloads/`
 
-[Icons]
-Name: "{group}\PTZ Proxy"; Filename: "{app}\ptz-proxy.exe"
-Name: "{commondesktop}\PTZ Proxy"; Filename: "{app}\ptz-proxy.exe"
+---
 
-[Run]
-Filename: "{app}\ptz-proxy.exe"; Description: "Launch PTZ Proxy"; Flags: postinstall nowait
+## Windows 방화벽 설정
+
+EXE 최초 실행 시 Windows 방화벽 경고가 나타납니다.
+
+1. **"액세스 허용"** 클릭 (또는 "자세한 정보" → "실행")
+2. 9902 포트를 인바운드 규칙에 허용
+
+다른 PC에서 접속하려면 Windows 방화벽에서 9902 포트를 수동으로 허용해야 합니다:
+
+```
+Windows 방화벽 → 고급 설정 → 인바운드 규칙 → 새 규칙
+→ 포트 → TCP → 9902 → 허용
 ```
 
-Inno Setup 컴파일:
-```batch
-iscc ptz-proxy-setup.iss
-```
-
-## 방화벽 설정
-
-Windows에서 EXE 실행 시 방화벽 경고가 나타날 수 있습니다.
-"허용"을 클릭하여 네트워크 접근을 허용해야 합니다.
+---
 
 ## 문제 해결
 
-### 1. 빌드 실패
+### pkg 빌드 실패
+
 ```bash
-# pkg 캐시 삭제 후 재시도
 npm cache clean --force
 npm install -g pkg
 ```
 
-### 2. 실행 시 오류
-- **EACCES**: 관리자 권한으로 실행하거나 다른 포트 사용
-- **EADDRINUSE**: 이미 사용 중인 포트, 다른 포트 지정
+### 실행 시 "포트 이미 사용 중" 오류 (EADDRINUSE)
 
-### 3. Windows Defender 경고
-신뢰할 수 있는 소스임을 확인하고 "자세한 정보" → "실행" 클릭
+```bat
+ptz-proxy.exe 8765   # 다른 포트 사용
+```
 
-## 파일 크기
+### 실행 시 "권한 없음" 오류 (EACCES)
 
-pkg로 빌드된 EXE 파일은 Node.js 런타임을 포함하므로 약 **40-50MB** 크기입니다.
-이는 정상적인 크기이며, 압축하면 약 15-20MB로 줄일 수 있습니다.
+관리자 권한으로 실행하거나 1024 이상의 포트 사용
+
+### Windows Defender 경고 (서명 없음)
+
+pkg로 빌드된 EXE는 코드 서명이 없어 Defender 경고가 발생할 수 있습니다.  
+"자세한 정보" → "실행" 을 클릭하여 실행하세요.  
+신뢰할 수 있는 내부 배포 환경에서만 사용하세요.
+
+### ptz-proxy-electron 빌드 시 아이콘 오류
+
+`assets/icon.ico` 또는 `assets/icon.png` 파일이 없거나 크기가 부족할 경우 발생합니다.  
+256×256 이상의 PNG/ICO 파일을 `assets/` 폴더에 배치하세요.

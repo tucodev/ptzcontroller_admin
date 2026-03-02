@@ -2,218 +2,93 @@
 
 ## 목차
 
-1. [개요](#개요)
-2. [사전 준비](#사전-준비)
-3. [프로젝트 설정](#프로젝트-설정)
-4. [Cloudtype 배포](#cloudtype-배포)
+1. [사전 준비](#사전-준비)
+2. [로컬 DB 초기화](#로컬-db-초기화)
+3. [GitHub 푸시](#github-푸시)
+4. [Cloudtype 배포 설정](#cloudtype-배포-설정)
 5. [환경 변수 설정](#환경-변수-설정)
-6. [데이터베이스 연결](#데이터베이스-연결)
-7. [배포 후 설정](#배포-후-설정)
-8. [문제 해결](#문제-해결)
+6. [배포 후 확인](#배포-후-확인)
+7. [문제 해결](#문제-해결)
 
 ---
 
-## 주의
+## 주의사항
 
-```
-cloudtype에 배포전에 database 가 구성되어 있어야 함.
-local 에서 다음을 실행할 것.
+> ⚠️ **Cloudtype 배포 전에 반드시 로컬에서 DB 마이그레이션을 완료해야 합니다.**
 
+```bash
+cd ptzcontroller_admin
 yarn install
 yarn prisma generate
 yarn prisma migrate dev
-yarn prisma db seed
+yarn prisma db seed    # 선택 사항 (테스트 계정 생성)
 ```
 
-## CloudType 설정
+---
 
-<center>
-  <img
-    src="./cloudtype-setup.png"
-    width="680"
-    height="2164"
-  />
-</center>
+## Cloudtype 설정 화면
 
-## 개요
-
-[Cloudtype](https://cloudtype.io)은 한국 기반 클라우드 플랫폼으로, Next.js 애플리케이션을 쉽게 배포할 수 있습니다.
-
-### 특징
-
-- GitHub 연동 자동 배포
-- 무료 플랜 제공
-- PostgreSQL, MySQL 등 데이터베이스 서비스
-- 커스텀 도메인 지원
-- SSL 자동 설정
+![Cloudtype 설정](./cloudtype-setup.png)
 
 ---
 
 ## 사전 준비
 
-### 1. 계정 생성
+### 1. Neon PostgreSQL 준비
 
-1. [cloudtype.io](https://cloudtype.io) 접속
-2. GitHub 또는 이메일로 회원가입
-3. 결제 정보 등록 (유료 플랜 사용 시)
+1. [console.neon.tech](https://console.neon.tech) 접속
+2. 프로젝트 생성
+3. Connection string 복사:
+   ```
+   postgresql://username:password@ep-xxxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+   ```
 
-### 2. GitHub 저장소 생성
+### 2. 필수 파일 확인
 
-```bash
-# 로컬에서 Git 초기화
-cd ptzcontroller_admin
-git init
-git add .
-git commit -m "Initial commit"
-
-# GitHub에 푸시
-git remote add origin https://github.com/username/ptz-controller.git
-git push -u origin main
-```
-
-### 3. 필수 파일 확인
+`ptzcontroller_admin/` 에 다음 파일이 있어야 합니다:
 
 ```
-project_root/
-├── ptzcontroller_admin/
-│   ├── package.json      # ✅ 필수
-│   ├── next.config.js    # ✅ 필수
-│   ├── prisma/
-│   │   └── schema.prisma # ✅ DB 사용 시
-│   └── ...
-└── ...
+ptzcontroller_admin/
+├── package.json          ✅ build-cloudtype 스크립트 포함
+├── next.config.js        ✅ output: "standalone" 설정
+├── cloudtype.yaml        ✅ 배포 설정
+└── prisma/schema.prisma  ✅ binaryTargets 포함
 ```
 
----
-
-## 프로젝트 설정
-
-### next.config.js 수정
-
-```javascript
-// next.config.js
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-    output: "standalone", // Cloudtype 배포 시 권장
-    /* tuco remove: 필요시 살린다. --> 현재는 사용안하고 잘 됨
-      experimental: {
-        outputFileTracingRoot: require("path").join(__dirname, ".."),
-    },
-    */
-    // CORS 설정 (필요 시 ---> 현재는 사용안하고 잘 됨, 필요시 살린다.)
-    /* tuco remove
-    async headers() {
-        return [
-            {
-                source: "/api/:path*",
-                headers: [
-                    { key: "Access-Control-Allow-Origin", value: "*" },
-                    {
-                        key: "Access-Control-Allow-Methods",
-                        value: "GET,POST,PUT,DELETE,OPTIONS",
-                    },
-                ],
-            },
-        ];
-    },
-    */
-};
-
-module.exports = nextConfig;
-```
-
-### package.json 확인
+### 3. `package.json` 확인
 
 ```json
 {
-    "name": "ptz-controller",
-    "version": "1.0.0",
     "scripts": {
         "dev": "next dev",
         "build": "prisma generate && next build",
         "build-cloudtype": "prisma generate && next build",
         "rebuild": "next build",
-        "start": "next start",
-        "lint": "next lint"
-        //"postinstall": "prisma generate"
+        "start": "next start"
     },
     "engines": {
-        "node": ">=24.0.0"
+        "node": ">=18.0.0"
     }
 }
 ```
 
-### .gitignore 확인
+> Cloudtype 빌드 명령: `yarn build-cloudtype`
 
-```gitignore
-# .gitignore
-node_modules/
-.next/
-.env
-.env.local
-.env.production.local
-data/*.json
+### 4. `next.config.js` 확인
+
+```javascript
+const nextConfig = {
+    output: "standalone",          // ← 반드시 있어야 함
+    eslint: { ignoreDuringBuilds: true },
+    typescript: { ignoreBuildErrors: false },
+    images: { unoptimized: true },
+};
+module.exports = nextConfig;
 ```
 
----> 나의 경우 (tuco) 이렇게만 설정함
-
-```gitignore
-# .gitignore
-node_modules/
-```
-
----
-
-## Cloudtype 배포
-
-### 1. 프로젝트 생성
-
-1. Cloudtype 대시보드 접속
-2. "새 프로젝트" 클릭
-3. GitHub 저장소 연결
-4. 저장소 선택: `username/ptz-controller`
-
-### 2. 배포 설정
-
-| 설정          | 값                     |
-| ------------- | ---------------------- |
-| 프레임워크    | Next.js                |
-| Node.js 버전  | 18.x                   |
-| 빌드 명령어   | `yarn build-cloudtype` |
-| 시작 명령어   | `yarn start`           |
-| 루트 디렉토리 | `ptzcontroller_admin`  |
-| 포트          | 3000                   |
-
-### 3. cloudtype.yaml 설정 (선택)
-
-프로젝트 루트에 `cloudtype.yaml` 생성:
+### 5. `cloudtype.yaml` 확인
 
 ```yaml
-# cloudtype.yaml
-name: ptz-controller
-app: ptzcontroller_admin
-
-services:
-    - name: web
-      type: nextjs
-      node: 24
-      build:
-          command: yarn build-cloudtype
-      start:
-          command: yarn start
-      env:
-          - DATABASE_URL
-          - NEXTAUTH_URL
-          - NEXTAUTH_SECRET
-      resources:
-          cpu: 0.5
-          memory: 512Mi
-```
-
---> 나의 경우 (tuco)
-
-```
-# cloudtype.yaml
 name: ptz-controller
 app: ptzcontroller_admin
 
@@ -233,241 +108,169 @@ services:
           memory: 512Mi
 ```
 
-### 4. 배포 실행
+> **주의**: `NEXTAUTH_URL`은 env 목록에서 제외되어 있습니다.  
+> Cloudtype은 배포 URL을 자동 설정합니다. 필요 시 환경 변수 탭에서 직접 추가하세요.
 
-1. "배포" 버튼 클릭
-2. 빌드 로그 확인
-3. 배포 완료 후 URL 확인
+---
+
+## 로컬 DB 초기화
+
+Cloudtype 배포 전 로컬에서 DB를 먼저 구성합니다.
+
+```bash
+cd ptzcontroller_admin
+
+# 1. 의존성 설치
+yarn install
+
+# 2. Prisma 클라이언트 생성
+yarn prisma generate
+
+# 3. 마이그레이션 실행 (최초 1회)
+yarn prisma migrate dev --name init
+
+# 4. Seed 데이터 생성 (테스트 계정)
+yarn prisma db seed
+```
+
+**이미 DB가 구성된 경우**: `migrate dev` 생략 가능. 스키마 변경이 있을 때만 실행.
+
+**DB 초기화 (전체 삭제 후 재시작)**:
+```bash
+yarn prisma migrate reset
+# → Are you sure? → y
+```
+
+---
+
+## GitHub 푸시
+
+```bash
+cd ptzcontroller_admin
+git init
+git add .
+git commit -m "Initial commit"
+
+git remote add origin https://github.com/username/ptz-controller.git
+git push -u origin main
+```
+
+> **`.gitignore` 최소 설정** (현재 프로젝트 권장):
+> ```gitignore
+> node_modules/
+> ```
+> `.next/`, `.env` 등을 포함시키면 Cloudtype 배포에서 문제가 생길 수 있습니다.
+
+---
+
+## Cloudtype 배포 설정
+
+### 1. 프로젝트 생성
+
+1. [cloudtype.io](https://cloudtype.io) 접속 → "새 프로젝트"
+2. GitHub 저장소 연결 → 저장소 선택
+
+### 2. 배포 설정값
+
+| 항목 | 값 |
+|------|-----|
+| 프레임워크 | Next.js |
+| Node.js 버전 | **18** |
+| 빌드 명령어 | `yarn build-cloudtype` |
+| 시작 명령어 | `yarn start` |
+| 루트 디렉토리 | `ptzcontroller_admin` |
+| 포트 | `3000` |
 
 ---
 
 ## 환경 변수 설정
 
-### Cloudtype 대시보드에서 설정
+Cloudtype 대시보드 → 프로젝트 → **환경 변수** 탭에서 설정:
 
-1. 프로젝트 선택
-2. "환경 변수" 탭 클릭
-3. 변수 추가:
-
-| 변수명          | 값                             | 설명                  |
-| --------------- | ------------------------------ | --------------------- |
-| DATABASE_URL    | postgresql://...               | 데이터베이스 연결 URL |
-| NEXTAUTH_URL    | https://your-app.cloudtype.app | 배포된 앱 URL         |
-| NEXTAUTH_SECRET | (랜덤 문자열)                  | 인증 시크릿           |
-| NODE_ENV        | production                     | 환경 설정             |
+| 변수명 | 예시 값 | 설명 |
+|--------|---------|------|
+| `DATABASE_URL` | `postgresql://user:pass@ep-xxxx.neon.tech/neondb?sslmode=require` | Neon DB 연결 URL |
+| `NEXTAUTH_SECRET` | `K8v3Ht7Lm...` (32자 랜덤) | JWT 서명 키 |
+| `NEXTAUTH_URL` | `https://your-app.cloudtype.app` | (선택) 배포 URL |
 
 ### NEXTAUTH_SECRET 생성
 
 ```bash
-# 로컬에서 생성
 openssl rand -base64 32
-# 결과 예: K8v3Ht7LmN9pQwXz2Rf6Yb4Jc1Sd5Ag8
 ```
 
 ---
 
-## 데이터베이스 연결
+## 배포 후 확인
 
-### Cloudtype PostgreSQL 사용
+### 1. 첫 번째 회원가입 → admin 자동 부여
 
-1. 대시보드에서 "데이터베이스" → "PostgreSQL" 선택
-2. 새 데이터베이스 생성
-3. 연결 정보 복사
-4. DATABASE_URL 환경 변수에 설정
+배포 후 처음 가입하는 사용자는 자동으로 **admin** 권한이 부여됩니다.  
+(seed 계정 `john@doe.com`은 자동 admin 판정에서 제외)
 
-```
-postgresql://username:password@host:port/database?sslmode=require
-```
+### 2. admin 버튼 확인
 
-### 외부 데이터베이스 연결
+로그인 후 헤더에 🛡️ 버튼이 표시되면 admin으로 정상 로그인된 것입니다.
 
-**Supabase 사용 시:**
+### 3. Proxy 파일 업로드 (선택)
 
-```
-postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres
-```
-
-**Neon 사용 시:**
-
-```
-postgresql://[USER]:[PASSWORD]@[HOST]/[DATABASE]?sslmode=require
-```
-
-### 데이터베이스 마이그레이션
-
-```bash
-# 로컬에서 마이그레이션 생성
-DATABASE_URL="your-production-url" npx prisma migrate deploy
-
-# 시드 데이터 (필요 시)
-DATABASE_URL="your-production-url" npx prisma db seed
-```
+🛡️ → "Proxy 파일" 탭 → `ptz-proxy-setup.exe` 등 업로드  
+→ 사용자 Proxy 연결 실패 팝업에 자동으로 다운로드 링크 표시
 
 ---
 
-## 배포 후 설정
+## Proxy 모드 관련 주의사항
 
-### 커스텀 도메인 설정
+Cloudtype에 배포된 웹 서버는 **Direct 모드**에서 Private 네트워크의 PTZ 카메라에 직접 접근할 수 없습니다.
 
-1. Cloudtype 대시보드 → "도메인" 탭
-2. "커스텀 도메인 추가"
-3. 도메인 입력: `ptz.yourdomain.com`
-4. DNS 설정:
-    ```
-    CNAME ptz → your-app.cloudtype.app
-    ```
-
-### HTTPS/SSL
-
-Cloudtype에서 자동으로 Let's Encrypt SSL 인증서 발급
-
-### 자동 배포 설정
-
-1. GitHub Actions 또는 Cloudtype 자동 배포 활성화
-2. `main` 브랜치 푸시 시 자동 배포
-
-```yaml
-# .github/workflows/deploy.yml (선택)
-name: Deploy to Cloudtype
-
-on:
-    push:
-        branches: [main]
-
-jobs:
-    deploy:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v3
-            - name: Deploy
-              uses: cloudtype/deploy-action@v1
-              with:
-                  token: ${{ secrets.CLOUDTYPE_TOKEN }}
-                  project: your-project-id
+**권장 구조:**
+```
+[Cloudtype Web Server]   [사용자 PC]          [로컬 네트워크]
+         │                    │                     │
+    웹앱 호스팅   ←─ HTTPS ─── 브라우저  ─WebSocket─→  PTZ Proxy
+    (UI + API)               │                     │
+                             └────────────────────→ PTZ Camera
 ```
 
----
-
-## Proxy 모드 고려사항
-
-### 중요: Cloudtype에서의 Proxy 모드
-
-Cloudtype에 배포된 서버는 Direct 모드로 PTZ 카메라를 제어할 수 없습니다 (Private 네트워크 접근 불가).
-
-**해결 방법:**
-
-1. **Proxy 모드 사용**: 사용자 PC에서 ptz-proxy 실행
-2. **VPN 연결**: 카메라 네트워크와 VPN 연결
-3. **포트 포워딩**: 카메라에 Public IP 할당
-
-### 권장 아키텍처
-
-```
-[Cloudtype Server]     [사용자 PC]          [로컬 네트워크]
-      │                    │                     │
-  웹 앱 호스팅      ←──── 브라우저 ────→    PTZ Proxy
-  (UI + API)               │                     │
-                           └──── WebSocket ──────┘
-                                                  │
-                                                  ▼
-                                            [PTZ Camera]
-```
+→ **Proxy 모드**를 사용하고, 사용자 PC에서 `ptz-proxy-electron`을 실행하세요.
 
 ---
 
 ## 문제 해결
 
-### 빌드 실패: Prisma Client
+### 빌드 실패: Prisma Client 오류
 
-```bash
-# package.json에 postinstall 추가
-"scripts": {
-  "postinstall": "prisma generate"
-}
-```
+`package.json`의 `build-cloudtype` 스크립트에 `prisma generate`가 포함되어 있는지 확인:
 
----> 또는
-
-```
-다음을 재확인
-
-(1) package.json 파일을 열고 다음 라인이 정상적으로 들어 있는지
-"build-cloudtype": "prisma generate && next build",
-
-
-package.json 전체 내용
-{
-    "name": "ptz-controller",
-    "version": "1.0.0",
-    "scripts": {
-        "dev": "next dev",
-        "build": "next build",
-        "build-cloudtype": "prisma generate && next build", // <--- tuco add, cloude type build command 에 build-cloudtype 이라고 입력한다.
-        "start": "next start",
-        "postinstall": "prisma generate"
-    },
-    "engines": {
-        "node": ">=18.0.0"
-    }
-}
-
-(2) cloudytype 배포 설정에
-    build command 가  아래처럼 설정되어 있는지
-
-build command  yarn build-cloudtype
+```json
+"build-cloudtype": "prisma generate && next build"
 ```
 
 ### 빌드 실패: 메모리 부족
 
 Cloudtype 대시보드에서 리소스 증가:
-
 - CPU: 1.0
 - Memory: 1024Mi
 
-### 환경 변수 미적용
+### 로그인이 안 됨 (NEXTAUTH_SECRET 오류)
 
-1. 환경 변수 설정 후 재배포 필요
-2. 변수명 대소문자 확인
-3. 따옴표 없이 값만 입력
+환경 변수 `NEXTAUTH_SECRET`이 설정되었는지 확인.  
+설정 후 **재배포** 필요.
 
-### CORS 에러
+### DATABASE_URL 연결 실패
 
-```javascript
-// next.config.js
-module.exports = {
-    async headers() {
-        return [
-            {
-                source: "/api/:path*",
-                headers: [{ key: "Access-Control-Allow-Origin", value: "*" }],
-            },
-        ];
-    },
-};
+1. Neon URL 형식 확인: `?sslmode=require` 포함 여부
+2. Neon 프로젝트가 활성 상태인지 확인
+3. 변수명 대소문자 확인 (`DATABASE_URL`)
+
+### admin 권한이 안 됨
+
+Neon 대시보드 → SQL Editor에서 직접 수정:
+
+```sql
+-- 현재 사용자 확인
+SELECT email, role FROM "User";
+
+-- admin으로 변경
+UPDATE "User" SET role = 'admin' WHERE email = '본인이메일@example.com';
 ```
-
-### 데이터베이스 연결 실패
-
-1. DATABASE_URL 형식 확인
-2. SSL 모드 확인 (`?sslmode=require`)
-3. 방화벽 설정 확인 (Cloudtype IP 허용)
-
----
-
-## 비용 최적화
-
-### 무료 플랜 제한
-
-- CPU: 0.5 Core
-- Memory: 512MB
-- 월 트래픽: 10GB
-
-### 유료 플랜 권장 사항
-
-- 동시 접속자가 많을 경우
-- 데이터베이스 연동 시
-- 커스텀 도메인 사용 시
-
-### 리소스 모니터링
-
-대시보드에서 CPU, 메모리, 네트워크 사용량 확인 가능

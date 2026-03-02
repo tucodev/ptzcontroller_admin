@@ -4,303 +4,251 @@
 
 1. [개요](#개요)
 2. [동작 원리](#동작-원리)
-3. [설치 방법](#설치-방법)
-4. [실행 방법](#실행-방법)
-5. [설정](#설정)
-6. [독립 배포판 만들기](#독립-배포판-만들기)
+3. [ptz-proxy-electron (권장)](#ptz-proxy-electron-권장)
+4. [ptz-proxy 소스 실행 (고급)](#ptz-proxy-소스-실행-고급)
+5. [웹앱에서 Proxy 모드 설정](#웹앱에서-proxy-모드-설정)
+6. [WebSocket API](#websocket-api)
 7. [문제 해결](#문제-해결)
 
 ---
 
 ## 개요
 
-PTZ Proxy는 브라우저에서 직접 PTZ 카메라를 제어할 수 있게 해주는 WebSocket 기반 프록시 서비스입니다.
+PTZ Proxy는 브라우저(또는 Electron 앱)가 Private 네트워크의 PTZ 카메라를 제어할 수 있도록  
+WebSocket ↔ TCP를 중계하는 서비스입니다.
 
 ### 사용 시나리오
 
-- PTZ 카메라가 Private 네트워크에 있을 때
-- 웹 서버에서 카메라에 직접 접근할 수 없을 때
+- PTZ 카메라가 Private 네트워크(로컬 LAN)에 있을 때
+- 웹 서버(클라우드)에서 카메라에 직접 접근할 수 없을 때
 - 사용자 PC에서만 카메라에 접근 가능할 때
+
+### 제공 형태 2가지
+
+| 형태 | 설명 | 권장 |
+|------|------|------|
+| **ptz-proxy-electron** | GUI + 시스템 트레이 앱 (Windows EXE) | ✅ 권장 |
+| **ptz-proxy 소스** | Node.js CLI 방식, ZIP 다운로드 | 고급 사용자 |
 
 ---
 
 ## 동작 원리
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Internet                                │
-│  ┌──────────────┐                    ┌──────────────────┐       │
-│  │  Web Server  │◄──── HTTPS ────────│     Browser      │       │
-│  │   (Cloud)    │                    │   (User's PC)    │       │
-│  └──────────────┘                    └────────┬─────────┘       │
-│                                               │                 │
-│                                          WebSocket              │
-│                                               │                 │
-│                                               ▼                 │
-│                                      ┌──────────────────┐       │
-│                                      │    PTZ Proxy     │       │
-│                                      │   (User's PC)    │       │
-│                                      └────────┬─────────┘       │
-└───────────────────────────────────────────────│─────────────────┘
-                                                │
-                              ┌─────────────────┼─────────────────┐
-                              │     Local Network                 │
-                              │                 │                 │
-                              │                 ▼                 │
-                              │        ┌──────────────┐           │
-                              │        │ PTZ Camera   │           │
-                              │        │ (192.168.x.x)│           │
-                              │        └──────────────┘           │
-                              └───────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                        Internet                         │
+│  ┌──────────────┐                 ┌──────────────────┐  │
+│  │  Web Server  │◄──── HTTPS ─────│     Browser      │  │
+│  │  (Cloud)     │                 │   (User's PC)    │  │
+│  └──────────────┘                 └────────┬─────────┘  │
+│                                            │            │
+│                                       WebSocket         │
+│                                            │            │
+│                                   ┌────────▼─────────┐  │
+│                                   │  ptz-proxy-      │  │
+│                                   │  electron        │  │
+│                                   │  (User's PC)     │  │
+│                                   └────────┬─────────┘  │
+└────────────────────────────────────────────│────────────┘
+                                             │ TCP
+                              ┌──────────────▼──────────┐
+                              │     Local Network        │
+                              │   ┌──────────────┐       │
+                              │   │  PTZ Camera  │       │
+                              │   │ 192.168.x.x  │       │
+                              │   └──────────────┘       │
+                              └─────────────────────────-┘
 ```
 
 ### 통신 흐름
 
-1. 브라우저가 PTZ Proxy에 WebSocket 연결
-2. 웹 앱에서 PTZ 명령 전송
-3. PTZ Proxy가 명령을 PelcoD/ujin 패킷으로 변환
+1. 브라우저가 PTZ Proxy에 WebSocket 연결 (`ws://[PC IP]:9902`)
+2. 웹앱에서 PTZ 명령 전송 (JSON)
+3. Proxy가 명령을 PelcoD 패킷으로 변환
 4. TCP 소켓으로 카메라에 전송
 
 ---
 
-## 설치 방법
+## ptz-proxy-electron (권장)
 
-### 방법 1: 프로젝트에서 직접 실행
+### 특징
 
-```bash
-# 프로젝트 디렉토리에서
-cd projectdir/ptzcontroller_admin
+| 기능 | 설명 |
+|------|------|
+| 🖥 GUI 메인 창 | 서버 상태, 클라이언트 수, 실시간 로그 표시 |
+| 🔔 시스템 트레이 | 창 닫아도 트레이에서 계속 실행 |
+| 🚀 트레이 시작 모드 | 앱 실행 시 창 없이 트레이만 표시 |
+| ⚙️ 포트 변경 | 앱 내에서 포트 번호 실시간 변경 |
+| 📝 실시간 로그 | 접속·명령·오류 색상 구분 (최대 200줄) |
 
-# 의존성 설치 (최초 1회)
-yarn install
+### 다운로드
 
-# PTZ Proxy 실행
-npx tsx ptz-proxy-standalone.ts
+**방법 1**: 웹앱에서 Proxy 연결 실패 시 자동으로 팝업 표시 → 다운로드 링크 클릭  
+**방법 2**: 관리자가 업로드한 파일 직접 다운로드 (관리자 Proxy 파일 탭 참조)
+
+### 빌드 방법 (소스에서 직접)
+
+**요구사항**: Node.js 18+
+
+```
+ptz-proxy-electron/
+├── main.js          ← Electron 메인 프로세스 (WebSocket 서버 포함)
+├── index.html       ← GUI 화면
+├── assets/
+│   ├── icon.ico     ← 아이콘 (필수, 256×256 이상)
+│   └── icon.png
+└── package.json     ← electron-builder 설정
 ```
 
-### 방법 2: 독립 실행 파일 사용
-
-```bash
-# 별도 폴더에 PTZ Proxy만 설치
-mkdir ptz-proxy
-cd ptz-proxy
-
-# package.json 생성
-npm init -y
-
-# 의존성 설치
-npm install ws typescript tsx
-
-# ptz-proxy-standalone.ts 복사
-cp /path/to/ptz-proxy-standalone.ts .
-
-# 실행
-npx tsx ptz-proxy-standalone.ts
+**아이콘 준비** (필수):
 ```
+assets/ 폴더에 icon.ico, icon.png 파일을 배치
+크기: 256×256 이상
+```
+
+**Windows EXE 빌드**:
+```bat
+build-electron.bat   ← 더블클릭
+```
+
+또는 수동:
+```bash
+npm install
+npm run build        # electron-builder --win --x64
+```
+
+**빌드 결과물** (`dist/` 폴더):
+
+| 파일 | 설명 |
+|------|------|
+| `PTZ Proxy Setup 1.0.1.exe` | 설치 프로그램 (시작 메뉴·바탕화면 등록) |
+| `PTZ-Proxy-Portable-1.0.1.exe` | Portable — 설치 없이 바로 실행 |
+
+### 트레이 아이콘 사용법
+
+| 동작 | 결과 |
+|------|------|
+| 창의 ✕ 또는 ⊟ 클릭 | 트레이로 최소화 (서버 계속 실행) |
+| 트레이 아이콘 클릭 | 창 열기 |
+| 트레이 우클릭 | 서버 시작/중지, 종료 메뉴 |
+| 트레이 메뉴 "종료" | 서버 중지 후 완전 종료 |
+
+### 시작 시 트레이 모드
+
+앱의 **"시작 시 트레이로 실행"** 토글을 ON 하면,  
+다음 실행부터 창 없이 트레이 아이콘만 표시됩니다.  
+설정은 자동 저장되며, 트레이 아이콘 클릭으로 창을 열 수 있습니다.
+
+설정 파일 위치: `%AppData%\ptz-proxy\config.json`
 
 ---
 
-## 실행 방법
+## ptz-proxy 소스 실행 (고급)
 
-### 기본 실행
+웹앱의 Proxy 연결 실패 팝업에서 **"소스 코드 (ZIP)"** 다운로드 시 제공되는 방식입니다.
+
+### 다운로드되는 ZIP 내용
+
+| 파일 | 설명 |
+|------|------|
+| `ptz-proxy.js` | 핵심 proxy 서버 소스 (Node.js) |
+| `package.json` | 의존성 (`ws` 패키지) |
+| `start.bat` | Windows 실행 스크립트 |
+| `start.sh` | Linux/Mac 실행 스크립트 |
+| `build-exe.bat` | Windows EXE 빌드 스크립트 |
+| `build-exe.sh` | Linux/Mac EXE 빌드 스크립트 |
+| `README.md` | 사용 안내 |
+
+### 실행 방법
 
 ```bash
-npx tsx ptz-proxy-standalone.ts
+# 압축 해제 후
+cd ptz-proxy-standalone
+
+npm install
+
+# Windows
+start.bat
+
+# Linux/Mac
+chmod +x start.sh
+./start.sh
+
+# 포트 지정
+node ptz-proxy.js 8765
 ```
 
 기본 포트: **9902**
 
-### 포트 지정
+### EXE로 빌드 (pkg 사용)
 
-```bash
-# 포트 9000으로 실행
-npx tsx ptz-proxy-standalone.ts 9000
+```bat
+build-exe.bat
 ```
 
-### 백그라운드 실행 (Linux/Mac)
+또는 수동:
 
 ```bash
-# nohup으로 백그라운드 실행
-nohup npx tsx ptz-proxy-standalone.ts &
+npm install
+npm install -g pkg
 
-# 로그 확인
-tail -f nohup.out
+# Windows EXE
+npx pkg ptz-proxy.js --targets node18-win-x64 --output dist/ptz-proxy.exe
 
-# 프로세스 종료
-pkill -f ptz-proxy-standalone
-```
-
-### Windows 서비스로 실행
-
-```batch
-@echo off
-REM start-proxy.bat
-cd /d %~dp0
-node ptz-proxy.js 9902
+# Linux
+npx pkg ptz-proxy.js --targets node18-linux-x64 --output dist/ptz-proxy-linux
 ```
 
 ---
 
-## 설정
+## 웹앱에서 Proxy 모드 설정
 
-### 웹 앱에서 Proxy 모드 설정
+### 카메라 설정
 
-1. 카메라 추가 시 **Operation Mode**를 "Proxy"로 선택
+1. 카메라 추가 시 **Operation Mode** → **"Proxy"** 선택
 2. **Proxy WebSocket URL** 입력:
-    - 같은 PC: `ws://localhost:9902`
-    - 다른 PC: `ws://192.168.1.100:9902` (Proxy PC의 IP)
 
-### 카메라 연결 설정
+| 상황 | URL |
+|------|-----|
+| 같은 PC에서 실행 중 | `ws://localhost:9902` |
+| 다른 PC에서 실행 중 | `ws://192.168.1.100:9902` (Proxy PC의 IP) |
 
-Proxy 연결 후 카메라 설정을 WebSocket으로 전송:
+### 연결 실패 시 자동 팝업
+
+Proxy 연결이 5초 내 실패하면 자동으로 다운로드 안내 팝업이 표시됩니다.
+
+- 관리자가 업로드한 파일 있음 → 해당 파일 링크 우선 표시
+- 업로드 파일 없음 → 소스 ZIP / GitHub 링크 표시
+
+### 관리자 Proxy 파일 업로드
+
+관리자 계정으로 로그인 → 🛡️ 버튼 → **"Proxy 파일"** 탭
+
+1. `ptz-proxy-setup.exe` 등 빌드된 파일 업로드
+2. 파일은 `public/downloads/` 에 저장
+3. 이후 사용자 팝업에 자동으로 다운로드 링크 표시
+
+---
+
+## WebSocket API
+
+서버 주소: `ws://[호스트IP]:9902`
+
+### 카메라 TCP 연결
 
 ```json
 {
     "type": "connect",
     "config": {
-        "host": "192.168.1.200",
-        "port": 5000,
+        "host": "192.168.1.100",
+        "port": 4001,
         "protocol": "pelcod",
         "address": 1
     }
 }
 ```
 
-### 지원 프로토콜
-
-| 프로토콜 | 설명                         |
-| -------- | ---------------------------- |
-| pelcod   | 표준 PelcoD 프로토콜         |
-| ujin     | PelcoD 변형 (확장 명령 포함) |
-
----
-
-## 독립 배포판 만들기
-
-### 파일 구조
-
-```
-ptz-proxy-standalone/
-├── node_modules/        # 의존성
-├── ptz-proxy.js         # 컴파일된 JavaScript
-├── package.json
-├── start.bat            # Windows 실행
-└── start.sh             # Linux/Mac 실행
-```
-
-### TypeScript 컴파일
-
-```bash
-# TypeScript 컴파일
-npx tsc ptz-proxy-standalone.ts --outDir dist --module commonjs --target ES2020 --esModuleInterop true --moduleResolution node
-```
-
-### package.json (독립 배포용)
-
-```json
-{
-    "name": "ptz-proxy",
-    "version": "1.0.0",
-    "main": "ptz-proxy.js",
-    "scripts": {
-        "start": "node ptz-proxy.js"
-    },
-    "dependencies": {
-        "ws": "^8.19.0"
-    }
-}
-```
-
-### Windows 실행 스크립트
-
-```batch
-@echo off
-REM start.bat
-cd /d %~dp0
-node ptz-proxy.js %1
-pause
-```
-
-### Linux/Mac 실행 스크립트
-
-```bash
-#!/bin/bash
-# start.sh
-cd "$(dirname "$0")"
-node ptz-proxy.js "$1"
-```
-
-### 배포 명령
-
-```bash
-# 1. 배포 폴더 생성
-mkdir -p dist/ptz-proxy
-
-# 2. 파일 복사
-cp ptz-proxy-standalone.ts dist/ptz-proxy/
-cp package.json dist/ptz-proxy/
-
-# 3. 의존성 설치
-cd dist/ptz-proxy
-npm install --production
-
-# 4. 컴파일 (옵션)
-npx tsc ptz-proxy-standalone.ts --outFile ptz-proxy.js
-
-# 5. 압축
-cd ..
-zip -r ptz-proxy.zip ptz-proxy/
-```
-
----
-
-## PTZ Proxy 소스 코드 구조
-
-### 주요 함수
-
-```typescript
-// WebSocket 서버 시작
-const wss = new WebSocketServer({ port: PORT });
-
-// 클라이언트 연결 처리
-wss.on("connection", (ws) => {
-    // ...
-});
-
-// PTZ 명령 처리
-function handleCommand(
-    command: PTZCommand,
-    socket: net.Socket,
-    address: number,
-) {
-    const packet = buildPelcoDPacket(command, address);
-    socket.write(Buffer.from(packet));
-}
-
-// PelcoD 패킷 생성
-function buildPelcoDPacket(command: PTZCommand, address: number): number[] {
-    // 8바이트 PelcoD 패킷 생성
-    // [0xFF, Address, Cmd1, Cmd2, Data1, Data2, Checksum]
-}
-```
-
-### 메시지 프로토콜
-
-**연결 요청:**
-
-```json
-{
-    "type": "connect",
-    "config": {
-        "host": "192.168.1.200",
-        "port": 5000,
-        "protocol": "pelcod",
-        "address": 1
-    }
-}
-```
-
-**PTZ 명령:**
+### PTZ 명령
 
 ```json
 {
@@ -313,7 +261,18 @@ function buildPelcoDPacket(command: PTZCommand, address: number): number[] {
 }
 ```
 
-**Raw 패킷 (직접 전송):**
+**지원 action:**
+
+| action | direction | 설명 |
+|--------|-----------|------|
+| `pan` | `left` / `right` | 좌우 회전 |
+| `tilt` | `up` / `down` | 상하 회전 |
+| `zoom` | `in` / `out` | 줌 |
+| `focus` | `near` / `far` | 초점 |
+| `preset` | `goto` / `set` | 프리셋 이동/저장 |
+| `stop` | — | 정지 |
+
+### Raw 패킷 직접 전송
 
 ```json
 {
@@ -322,21 +281,28 @@ function buildPelcoDPacket(command: PTZCommand, address: number): number[] {
 }
 ```
 
+### 연결 해제 / 상태 확인
+
+```json
+{ "type": "disconnect" }
+{ "type": "ping" }
+```
+
+### 서버 응답 타입
+
+| type | 설명 |
+|------|------|
+| `welcome` | 최초 연결 시 서버 정보 |
+| `connected` | 카메라 TCP 연결 성공 |
+| `command_sent` | PTZ 명령 전송 완료 + packet |
+| `raw_sent` | Raw 패킷 전송 완료 |
+| `pong` | ping 응답 |
+| `disconnected` | 연결 해제 완료 |
+| `error` | 오류 메시지 |
+
 ---
 
 ## 문제 해결
-
-### 연결 실패: ECONNREFUSED
-
-```
-Error: connect ECONNREFUSED 192.168.1.200:5000
-```
-
-**해결:**
-
-- 카메라 IP와 포트 확인
-- 카메라 전원 및 네트워크 연결 확인
-- 방화벽 설정 확인
 
 ### WebSocket 연결 실패
 
@@ -344,57 +310,28 @@ Error: connect ECONNREFUSED 192.168.1.200:5000
 WebSocket connection to 'ws://localhost:9902' failed
 ```
 
-**해결:**
+1. ptz-proxy-electron이 실행 중인지 확인 (트레이 아이콘)
+2. 포트 번호 확인 (기본: 9902)
+3. 방화벽에서 9902 포트 허용 여부 확인
+4. 다른 PC에서 접속 시 Proxy PC의 IP 주소 확인
 
-- PTZ Proxy가 실행 중인지 확인
-- 포트 번호 확인
-- 방화벽에서 해당 포트 허용
+### 카메라 TCP 연결 실패 (ECONNREFUSED)
 
-### 브라우저 보안 경고
+1. 카메라 IP와 포트 확인
+2. 카메라 전원 및 네트워크 연결 확인
+3. 카메라와 Proxy PC가 같은 네트워크인지 확인
+4. 방화벽 설정 확인
 
-혼합 콘텐츠(HTTPS + WS) 경고 시:
+### HTTPS 환경에서 ws:// 차단 (혼합 콘텐츠)
 
-**해결:**
+브라우저가 HTTPS 페이지에서 `ws://` 연결을 차단할 수 있습니다.
 
-- 로컬에서는 `ws://` 사용 가능
-- 외부 접속 시 WSS(WebSocket Secure) 필요
-- nginx 등으로 SSL 터미널 구성
+- 해결: nginx 등으로 `wss://` (WebSocket Secure) 프록시 구성
+- 또는: 브라우저 설정에서 해당 사이트의 혼합 콘텐츠 허용
 
 ### 카메라가 응답하지 않음
 
-**확인사항:**
-
-1. 프로토콜 설정 확인 (PelcoD vs ujin)
-2. 장치 주소(Address) 확인
-3. 통신 속도(Baud Rate) 확인 (시리얼 연결 시)
-
----
-
-## 보안 고려사항
-
-### 로컬 네트워크 제한
-
-```javascript
-// 로컬 IP만 허용
-wss.on("connection", (ws, req) => {
-    const ip = req.socket.remoteAddress;
-    if (!ip.startsWith("192.168.") && ip !== "127.0.0.1") {
-        ws.close();
-        return;
-    }
-    // ...
-});
-```
-
-### 인증 추가
-
-```javascript
-wss.on("connection", (ws, req) => {
-    const token = req.headers["authorization"];
-    if (token !== "Bearer YOUR_SECRET_TOKEN") {
-        ws.close();
-        return;
-    }
-    // ...
-});
-```
+1. 프로토콜 설정 확인 (PelcoD / ujin)
+2. 장치 주소(Address) 확인 (카메라 DIP 스위치)
+3. Hex 모니터에서 TX 패킷 전송 여부 확인
+4. 속도(speed) 값이 0이 아닌지 확인
