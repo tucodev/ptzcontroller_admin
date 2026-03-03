@@ -1,0 +1,8 @@
+{
+  "/dashboard/page": "app/dashboard/page.js",
+  "/api/config/cameras/route": "app/api/config/cameras/route.js",
+  "/login/page": "app/login/page.js",
+  "/api/license/verify/route": "app/api/license/verify/route.js",
+  "/api/auth/[...nextauth]/route": "app/api/auth/[...nextauth]/route.js",
+  "/api/offline-status/route": "app/api/offline-status/route.js"
+}

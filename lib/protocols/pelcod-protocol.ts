@@ -137,13 +137,15 @@ export class PelcoDProtocol extends BaseProtocol {
         return null;
     }
 
+    // PelcoD 패킷 구조: SYNC(FF) + ADDR + CMD1 + CMD2 + DATA1 + DATA2 + CHECKSUM
+    // CHECKSUM = (ADDR + CMD1 + CMD2 + DATA1 + DATA2) % 256
     const packet = [this.SYNC_BYTE, address, cmd1, cmd2, data1, data2];
     const checksum = (address + cmd1 + cmd2 + data1 + data2) % 256;
     packet.push(checksum);
     return packet;
   }
 
-  /** Proxy 모드용: TCP 소켓 없이 패킷 배열만 생성하여 반환 */
+  /** Proxy 모드용: TCP 소켓 없이 패킷 배열만 생성하여 반환  — proxy 모드에서 서버가 패킷을 만들어 클라이언트에 전달할 때 사용 */
   generatePacket(command: PTZCommand): number[] | null {
     return this.buildPacket(command);
   }

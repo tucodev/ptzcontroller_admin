@@ -15,7 +15,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   theme:              'dark',
 };
 
-// data 디렉토리 없으면 자동 생성
+// data 디렉토리가 없으면 생성
 function ensureDataDir(): void {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -36,6 +36,7 @@ function readJsonFile<T>(filePath: string, defaultValue: T): T {
   return defaultValue;
 }
 
+// JSON 파일 쓰기
 function writeJsonFile<T>(filePath: string, data: T): void {
   ensureDataDir();
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');

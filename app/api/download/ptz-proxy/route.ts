@@ -1,91 +1,112 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createReadStream, existsSync, statSync } from 'fs';
-import { join } from 'path';
-import archiver from 'archiver';
-import { Readable } from 'stream';
+import { NextRequest, NextResponse } from "next/server";
+import { existsSync, statSync, readFileSync, readdirSync } from "fs";
+import { join } from "path";
+import archiver from "archiver";
+
+// ─────────────────────────────────────────────────────────────
+// force-dynamic: request.url(searchParams)를 사용하는 라우트는
+// 반드시 동적 렌더링으로 지정해야 함.
+// 없으면 Next.js 빌드 시 static rendering을 시도하다 에러 발생:
+//   "Dynamic server usage: couldn't be rendered statically"
+// ─────────────────────────────────────────────────────────────
+export const dynamic = "force-dynamic";
 
 // PTZ Proxy 파일 다운로드
 // - ?type=list : 업로드된 파일 목록 반환 (JSON)
 // - ?file=xxx  : public/downloads/xxx 파일 직접 다운로드
-// - (기본)      : 업로드된 파일이 있으면 목록 반환, 없으면 동적 ZIP 생성
+// - (기본)      : 업로드된 파일이 없으면 동적 ZIP 생성
 export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const fileParam = searchParams.get('file');
-    const typeParam = searchParams.get('type');
+    try {
+        const { searchParams } = request.nextUrl;
+        const fileParam = searchParams.get("file");
+        const typeParam = searchParams.get("type");
 
-    const downloadsDir = join(process.cwd(), 'public', 'downloads');
+        const downloadsDir = join(process.cwd(), "public", "downloads");
 
-    // ?file=filename → 특정 파일 직접 다운로드
-    if (fileParam) {
-      const safeName = fileParam.replace(/[^a-zA-Z0-9._\-]/g, '_');
-      const filePath = join(downloadsDir, safeName);
-      if (!existsSync(filePath)) {
-        return NextResponse.json({ error: 'File not found' }, { status: 404 });
-      }
-      const buffer = require('fs').readFileSync(filePath);
-      const isExe = safeName.endsWith('.exe') || safeName.endsWith('.msi');
-      return new NextResponse(buffer, {
-        headers: {
-          'Content-Type': isExe ? 'application/octet-stream' : 'application/zip',
-          'Content-Disposition': `attachment; filename="${safeName}"`,
-          'Content-Length': buffer.length.toString(),
-        },
-      });
+        // ?file=filename → 특정 파일 직접 다운로드
+        if (fileParam) {
+            const safeName = fileParam.replace(/[^a-zA-Z0-9._\-]/g, "_");
+            const filePath = join(downloadsDir, safeName);
+            if (!existsSync(filePath)) {
+                return NextResponse.json(
+                    { error: "File not found" },
+                    { status: 404 },
+                );
+            }
+            const buffer = readFileSync(filePath);
+            const isExe =
+                safeName.endsWith(".exe") || safeName.endsWith(".msi");
+            return new NextResponse(buffer, {
+                headers: {
+                    "Content-Type": isExe
+                        ? "application/octet-stream"
+                        : "application/zip",
+                    "Content-Disposition": `attachment; filename="${safeName}"`,
+                    "Content-Length": buffer.length.toString(),
+                },
+            });
+        }
+
+        // ?type=list → 업로드된 파일 목록만 반환
+        if (typeParam === "list") {
+            const files = existsSync(downloadsDir)
+                ? readdirSync(downloadsDir).map((name: string) => {
+                      const stat = statSync(join(downloadsDir, name));
+                      return {
+                          filename: name,
+                          size: stat.size,
+                          downloadUrl: `/downloads/${name}`,
+                      };
+                  })
+                : [];
+            return NextResponse.json({ files });
+        }
+
+        // 기본: 동적 ZIP 생성
+        const files = {
+            "ptz-proxy.js": getPtzProxySource(),
+            "package.json": getPackageJson(),
+            "start.bat": getStartBat(),
+            "start.sh": getStartSh(),
+            "build-exe.bat": getBuildExeBat(),
+            "build-exe.sh": getBuildExeSh(),
+            "README.md": getReadme(),
+        };
+
+        // ZIP 파일 생성
+        const archive = archiver("zip", { zlib: { level: 9 } });
+        const chunks: Buffer[] = [];
+
+        archive.on("data", (chunk) => chunks.push(chunk));
+
+        // 파일들 추가
+        for (const [name, content] of Object.entries(files)) {
+            archive.append(content, { name: `ptz-proxy-standalone/${name}` });
+        }
+
+        await archive.finalize();
+
+        const buffer = Buffer.concat(chunks);
+
+        return new NextResponse(buffer, {
+            headers: {
+                "Content-Type": "application/zip",
+                "Content-Disposition":
+                    'attachment; filename="ptz-proxy-standalone.zip"',
+                "Content-Length": buffer.length.toString(),
+            },
+        });
+    } catch (error) {
+        console.error("Download error:", error);
+        return NextResponse.json(
+            { error: "Failed to create download" },
+            { status: 500 },
+        );
     }
-
-    // ?type=list → 업로드된 파일 목록만 반환
-    if (typeParam === 'list') {
-      const files = existsSync(downloadsDir)
-        ? require('fs').readdirSync(downloadsDir).map((name: string) => {
-            const stat = statSync(join(downloadsDir, name));
-            return { filename: name, size: stat.size, downloadUrl: `/downloads/${name}` };
-          })
-        : [];
-      return NextResponse.json({ files });
-    }
-
-    // 기본: 동적 ZIP 생성
-    const files = {
-      'ptz-proxy.js': getPtzProxySource(),
-      'package.json': getPackageJson(),
-      'start.bat': getStartBat(),
-      'start.sh': getStartSh(),
-      'build-exe.bat': getBuildExeBat(),
-      'build-exe.sh': getBuildExeSh(),
-      'README.md': getReadme()
-    };
-
-    // ZIP 파일 생성
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    const chunks: Buffer[] = [];
-
-    archive.on('data', (chunk) => chunks.push(chunk));
-    
-    // 파일들 추가
-    for (const [name, content] of Object.entries(files)) {
-      archive.append(content, { name: `ptz-proxy-standalone/${name}` });
-    }
-
-    await archive.finalize();
-    
-    const buffer = Buffer.concat(chunks);
-
-    return new NextResponse(buffer, {
-      headers: {
-        'Content-Type': 'application/zip',
-        'Content-Disposition': 'attachment; filename="ptz-proxy-standalone.zip"',
-        'Content-Length': buffer.length.toString()
-      }
-    });
-  } catch (error) {
-    console.error('Download error:', error);
-    return NextResponse.json({ error: 'Failed to create download' }, { status: 500 });
-  }
 }
 
 function getPtzProxySource(): string {
-  return `/**
+    return `/**
  * PTZ Proxy - Standalone WebSocket Server
  * 
  * 브라우저와 PTZ 카메라 사이의 프록시 역할을 하는 독립 실행 서버
@@ -458,7 +479,7 @@ process.on('SIGTERM', () => {
 }
 
 function getPackageJson(): string {
-  return `{
+    return `{
   "name": "ptz-proxy",
   "version": "1.0.1",
   "description": "PTZ Camera WebSocket Proxy Server",
@@ -479,7 +500,7 @@ function getPackageJson(): string {
 }
 
 function getStartBat(): string {
-  return `@echo off
+    return `@echo off
 echo ============================================
 echo       PTZ Proxy Server Launcher
 echo ============================================
@@ -518,7 +539,7 @@ pause
 }
 
 function getStartSh(): string {
-  return `#!/bin/bash
+    return `#!/bin/bash
 echo "============================================"
 echo "       PTZ Proxy Server Launcher"
 echo "============================================"
@@ -549,7 +570,7 @@ node ptz-proxy.js $PORT
 }
 
 function getBuildExeBat(): string {
-  return `@echo off
+    return `@echo off
 echo ============================================
 echo       PTZ Proxy EXE Builder
 echo ============================================
@@ -609,7 +630,7 @@ pause
 }
 
 function getBuildExeSh(): string {
-  return `#!/bin/bash
+    return `#!/bin/bash
 echo "============================================"
 echo "       PTZ Proxy EXE Builder"
 echo "============================================"
@@ -662,7 +683,7 @@ echo
 }
 
 function getReadme(): string {
-  return `# PTZ Proxy - Standalone Server v1.0.1
+    return `# PTZ Proxy - Standalone Server v1.0.1
 
 PTZ 카메라를 원격으로 제어하기 위한 WebSocket 프록시 서버
 

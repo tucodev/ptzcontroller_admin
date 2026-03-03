@@ -15,11 +15,11 @@
 
 ### 필수 소프트웨어
 
-| 소프트웨어 | 버전 | 용도 |
-|-----------|------|------|
-| Node.js | **24.x 이상** | 런타임 |
-| Yarn | 1.22.x 이상 | 패키지 매니저 |
-| Git | 2.x 이상 | 버전 관리 |
+| 소프트웨어 | 버전          | 용도          |
+| ---------- | ------------- | ------------- |
+| Node.js    | **24.x 이상** | 런타임        |
+| Yarn       | 1.22.x 이상   | 패키지 매니저 |
+| Git        | 2.x 이상      | 버전 관리     |
 
 ### Node.js 설치
 
@@ -78,14 +78,14 @@ generator client {
 ```javascript
 const nextConfig = {
     // *** tuco add ***
-    output: "standalone",   // ← 반드시 있어야 함 (standalone 빌드)
+    output: "standalone", // ← 반드시 있어야 함 (standalone 빌드)
     // *** tuco remove ***
-           // 아래사항은 삭제
-           // distDir: process.env.NEXT_DIST_DIR || '.next',
-           // output: process.env.NEXT_OUTPUT_MODE,
-           // experimental: {
-           //   outputFileTracingRoot: path.join(__dirname, '../'),
-           // },
+    // 아래사항은 삭제
+    // distDir: process.env.NEXT_DIST_DIR || '.next',
+    // output: process.env.NEXT_OUTPUT_MODE,
+    // experimental: {
+    //   outputFileTracingRoot: path.join(__dirname, '../'),
+    // },
     eslint: { ignoreDuringBuilds: true },
     typescript: { ignoreBuildErrors: false },
     images: { unoptimized: true },
@@ -95,16 +95,16 @@ module.exports = nextConfig;
 
 ### 주요 의존성
 
-| 패키지 | 버전 | 용도 |
-|--------|------|------|
-| next | 14.2.28 | Next.js 프레임워크 |
-| react | 18.2.0 | UI 라이브러리 |
-| next-auth | 4.24.11 | 인증 (JWT 세션) |
-| @prisma/client | 6.7.0 | 데이터베이스 ORM |
-| framer-motion | 10.x | 애니메이션 |
-| ws | 8.x | WebSocket (Proxy 모드) |
-| next-themes | 0.3.0 | 테마 관리 |
-| archiver | 7.x | ZIP 생성 (Proxy 파일 다운로드) |
+| 패키지         | 버전    | 용도                           |
+| -------------- | ------- | ------------------------------ |
+| next           | 14.2.28 | Next.js 프레임워크             |
+| react          | 18.2.0  | UI 라이브러리                  |
+| next-auth      | 4.24.11 | 인증 (JWT 세션)                |
+| @prisma/client | 6.7.0   | 데이터베이스 ORM               |
+| framer-motion  | 10.x    | 애니메이션                     |
+| ws             | 8.x     | WebSocket (Proxy 모드)         |
+| next-themes    | 0.3.0   | 테마 관리                      |
+| archiver       | 7.x     | ZIP 생성 (Proxy 파일 다운로드) |
 
 ---
 
@@ -160,11 +160,21 @@ yarn prisma migrate dev --name init
 # Seed 데이터 생성 (테스트 계정 john@doe.com)
 
 ```bash
+# 샘플 로그인 정보 1 계정 등록함
+
 yarn prisma db seed
 ```
 
 > ⚠️ 이미 DB가 있는 경우 `migrate dev` 생략 가능.  
 > 실수로 중복 실행 시 `yarn prisma migrate reset` 으로 초기화 (데이터 삭제 주의).
+
+## DB 툴
+
+이 툴로 DB의 데이터 확인 및 수정 가능함.
+
+```
+npx prisma studio "postgresql://neondb_owner:npg_cP1qQeFoMkO3@ep-patient-waterfall-a1tk4pzw-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+```
 
 ### 개발 서버 시작
 

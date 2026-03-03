@@ -14,6 +14,7 @@ import {
     Wifi,
     WifiOff,
     Shield,
+    AlertTriangle,
 } from "lucide-react";
 import PTZControlPanel from "@/components/ptz-control-panel";
 import CameraList from "@/components/camera-list";
@@ -43,6 +44,11 @@ export default function DashboardPage() {
     const [hexLogs, setHexLogs] = useState<HexLogEntry[]>([]);
     const logIdCounter = useRef(0);
 
+    // ── 오프라인 모드 ──────────────────────────────────────────
+    // login 페이지에서 sessionStorage 에 저장한 플래그로 판단.
+    // API 라우트는 requireSession() 내부에서 DB 상태를 확인해 자동으로 통과시킴.
+    const [isOfflineMode, setIsOfflineMode] = useState(false);
+
     // ─── Hex 모니터 로그 추가 헬퍼 ───────────────────────────
     const addHexLog = useCallback(
         (type: "tx" | "rx", data: number[] | string, description?: string) => {
@@ -58,9 +64,12 @@ export default function DashboardPage() {
         [],
     );
 
-    // 미인증 시 로그인 페이지로 리다이렉트
+    // 오프라인 모드 플래그 확인 + 미인증 리다이렉트
     useEffect(() => {
-        if (status === "unauthenticated") {
+        const offline = sessionStorage.getItem("offlineMode") === "true";
+        setIsOfflineMode(offline);
+        // 오프라인 모드가 아닌 경우에만 로그인 페이지로 리다이렉트
+        if (status === "unauthenticated" && !offline) {
             router.replace("/login");
         }
     }, [status, router]);
@@ -79,10 +88,11 @@ export default function DashboardPage() {
     }, []);
 
     useEffect(() => {
-        if (status === "authenticated") {
+        // 정상 로그인 또는 오프라인 모드 둘 다 카메라 목록 로드
+        if (status === "authenticated" || isOfflineMode) {
             fetchCameras();
         }
-    }, [status, fetchCameras]);
+    }, [status, isOfflineMode, fetchCameras]);
 
     // ─── 카메라 연결 ──────────────────────────────────────────
     const handleConnect = async (camera: CameraConfig) => {
@@ -233,7 +243,7 @@ export default function DashboardPage() {
         setShowAddModal(false);
     };
 
-    if (status === "loading" || loading) {
+    if ((status === "loading" && !isOfflineMode) || loading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background">
                 <Loader2 className="w-10 h-10 animate-spin text-primary" />
@@ -250,15 +260,15 @@ export default function DashboardPage() {
                         <div className="bg-primary/20 p-2 rounded-lg">
                             <Camera className="w-6 h-6 text-primary" />
                         </div>
-                        <h1 className="text-xl font-bold">PTZ Controller</h1>
+                        <h1 className="text-xl font-bold">TYCHE PTZ Controller</h1>
                     </div>
 
                     <div className="flex items-center gap-3">
                         <span className="text-muted-foreground text-sm hidden sm:block">
-                            {session?.user?.email}
+                            {isOfflineMode ? "오프라인 모드" : session?.user?.email}
                         </span>
-                        {/* admin 역할인 경우만 관리자 버튼 표시 */}
-                        {(session?.user as { role?: string })?.role === "admin" && (
+                        {/* admin 역할이고 오프라인이 아닌 경우만 관리자 버튼 표시 */}
+                        {!isOfflineMode && (session?.user as { role?: string })?.role === "admin" && (
                             <button
                                 onClick={() => setShowAdmin(true)}
                                 className="p-2 hover:bg-amber-500/20 text-amber-500 rounded-lg transition-colors"
@@ -273,19 +283,36 @@ export default function DashboardPage() {
                         >
                             <Settings className="w-5 h-5" />
                         </button>
-                        {/* signOut redirect 문제 우회: redirect:false 후 수동 이동 */}
+                        {/* 로그아웃: 오프라인이면 sessionStorage 정리, 온라인이면 signOut */}
                         <button
                             onClick={async () => {
-                                await signOut({ redirect: false });
+                                if (isOfflineMode) {
+                                    sessionStorage.removeItem("offlineMode");
+                                } else {
+                                    await signOut({ redirect: false });
+                                }
                                 window.location.href = "/login";
                             }}
                             className="p-2 hover:bg-muted rounded-lg transition-colors text-destructive"
+                            title="로그아웃"
                         >
                             <LogOut className="w-5 h-5" />
                         </button>
                     </div>
                 </div>
             </header>
+
+            {/* ── 오프라인 모드 배너 ───────────────────────────────────── */}
+            {isOfflineMode && (
+                <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2">
+                    <div className="max-w-7xl mx-auto flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        <span>
+                            오프라인 모드 — DB 연결 없이 실행 중입니다. 관리자 기능을 사용하려면 DB 연결 후 재로그인하세요.
+                        </span>
+                    </div>
+                </div>
+            )}
 
             <main className="max-w-7xl mx-auto px-4 py-6">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
