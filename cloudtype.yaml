@@ -1,11 +1,11 @@
 # cloudtype.yaml
-name: ptz-controller
+name: ptzcontroller_admin
 app: ptzcontroller_admin
 
 services:
     - name: web
       type: nextjs
-      node: 18
+      node: 24
       build:
           command: yarn build-cloudtype
       start:

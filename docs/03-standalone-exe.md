@@ -2,7 +2,7 @@
 
 ## 개요
 
-`ptzcontroller-desktop/` 은 Next.js 웹앱(`ptzcontroller_admin/`)을  
+`ptzcontroller_desktop/` 은 Next.js 웹앱(`ptzcontroller_admin/`)을  
 **Electron으로 감싸 Windows EXE 파일로 패키징**하는 프로젝트입니다.
 
 ### 폴더 구조 (전제 조건)
@@ -10,7 +10,7 @@
 ```
 (상위 폴더)/
 ├── ptzcontroller_admin/       ← Next.js 웹앱 소스 (원본)
-└── ptzcontroller-desktop/     ← Electron 래퍼 (이 폴더)
+└── ptzcontroller_desktop/     ← Electron 래퍼 (이 폴더)
     ├── electron/
     │   ├── main.js            ← Electron 메인 프로세스
     │   └── preload.js
@@ -38,7 +38,9 @@
 
 ## 빌드 순서 (총정리)
 
-### Step 1: Next.js 의존성 설치 및 빌드
+### Step 1: 먼저 바탕이되는 ptzcontroller_admin 빌드
+
+이미 빌드시 생략
 
 ```bash
 cd ../ptzcontroller_admin
@@ -49,6 +51,7 @@ yarn build          # prisma generate + next build
 빌드 완료 후 `ptzcontroller_admin/.next/standalone/` 폴더가 생성되어야 합니다.
 
 > **재빌드 시 (의존성 변경 없을 때):**
+>
 > ```bash
 > yarn rebuild    # next build만 실행 (빠름)
 > ```
@@ -56,23 +59,23 @@ yarn build          # prisma generate + next build
 ### Step 2: standalone 복사
 
 ```bash
-cd ../ptzcontroller-desktop
+cd ../ptzcontroller_desktop
 npm install         # 최초 1회
 npm run copy:standalone
 ```
 
 이 스크립트는 다음을 수행합니다:
 
-| 단계 | 내용 |
-|------|------|
-| [1/6] | `standalone/` 복사 |
-| [2/6] | `.next/static/` 복사 |
-| [3/6] | `public/` 복사 |
-| [4/6] | `data/` 복사 |
+| 단계  | 내용                                   |
+| ----- | -------------------------------------- |
+| [1/6] | `standalone/` 복사                     |
+| [2/6] | `.next/static/` 복사                   |
+| [3/6] | `public/` 복사                         |
+| [4/6] | `data/` 복사                           |
 | [5/6] | `.env` 복사 + `NEXTAUTH_URL` 자동 추가 |
-| [6/6] | Prisma 엔진 바이너리 강제 복사 |
+| [6/6] | Prisma 엔진 바이너리 강제 복사         |
 
-완료 후 `ptzcontroller-desktop/standalone/` 폴더를 확인하세요.
+완료 후 `ptzcontroller_desktop/standalone/` 폴더를 확인하세요.
 
 ### Step 3: 개발 모드 테스트 (권장)
 
@@ -124,7 +127,7 @@ out/
 │   ├── squirrel.windows/x64/
 │   │   └── PTZControllerSetup.exe   ← 설치 파일 (시작 메뉴 등록)
 │   └── zip/win32/x64/
-│       └── PTZ Controller-win32-x64.zip  ← 무설치 포터블
+│       └── ptzcontroller_admin-win32-x64.zip  ← 무설치 포터블
 ```
 
 ---
@@ -138,15 +141,21 @@ module.exports = {
         asar: {
             unpackDir: "{standalone,node_modules/.prisma,node_modules/@prisma}",
         },
-        name: "PTZ Controller",
-        executableName: "ptz-controller",
+        name: "ptzcontroller_admin",
+        executableName: "ptzcontroller_admin",
         icon: "./assets/icon",
-        extraResource: ["./standalone"],  // standalone을 resources에 복사
-        ignore: [/^\/standalone/],        // asar 패키지에서 제외 (중복 방지)
+        extraResource: ["./standalone"], // standalone을 resources에 복사
+        ignore: [/^\/standalone/], // asar 패키지에서 제외 (중복 방지)
     },
     makers: [
-        { name: "@electron-forge/maker-squirrel", config: { name: "PTZController" } },
-        { name: "@electron-forge/maker-zip", platforms: ["darwin", "linux", "win32"] },
+        {
+            name: "@electron-forge/maker-squirrel",
+            config: { name: "PTZController" },
+        },
+        {
+            name: "@electron-forge/maker-zip",
+            platforms: ["darwin", "linux", "win32"],
+        },
     ],
 };
 ```
@@ -159,12 +168,12 @@ module.exports = {
 
 ```javascript
 function getAppPath() {
-  if (app.isPackaged) {
-    // 패키징 후: extraResource로 복사된 resources/standalone/
-    return path.join(process.resourcesPath, 'standalone');
-  }
-  // 개발 모드: 프로젝트 루트 standalone/
-  return path.join(__dirname, '..', 'standalone');
+    if (app.isPackaged) {
+        // 패키징 후: extraResource로 복사된 resources/standalone/
+        return path.join(process.resourcesPath, "standalone");
+    }
+    // 개발 모드: 프로젝트 루트 standalone/
+    return path.join(__dirname, "..", "standalone");
 }
 ```
 
@@ -172,12 +181,15 @@ function getAppPath() {
 
 ```javascript
 function getNodeExecutable() {
-  if (app.isPackaged) {
-    const bundled = path.join(process.resourcesPath, 'node-bin',
-      process.platform === 'win32' ? 'node.exe' : 'node');
-    if (fs.existsSync(bundled)) return bundled;
-  }
-  return process.platform === 'win32' ? 'node.exe' : 'node';
+    if (app.isPackaged) {
+        const bundled = path.join(
+            process.resourcesPath,
+            "node-bin",
+            process.platform === "win32" ? "node.exe" : "node",
+        );
+        if (fs.existsSync(bundled)) return bundled;
+    }
+    return process.platform === "win32" ? "node.exe" : "node";
 }
 ```
 
@@ -196,10 +208,10 @@ const platformEngineMap = {
 ```javascript
 const serverEnv = {
     ...process.env,
-    ...envVars,            // .env 파일 값
+    ...envVars, // .env 파일 값
     PORT: String(PORT),
-    HOSTNAME: 'localhost',
-    NODE_ENV: 'production',
+    HOSTNAME: "localhost",
+    NODE_ENV: "production",
     NEXTAUTH_URL: envVars.NEXTAUTH_URL || `http://localhost:${PORT}`,
     PRISMA_QUERY_ENGINE_LIBRARY: engineFullPath,
 };
@@ -239,9 +251,11 @@ const serverEnv = {
 
 **원인 2:** `schema.prisma`의 `binaryTargets`에 `"windows"` 누락  
 → `prisma/schema.prisma` 확인:
+
 ```prisma
 binaryTargets = ["native", "windows", "linux-musl-arm64-openssl-3.0.x"]
 ```
+
 추가 후 `yarn prisma generate` 및 `yarn build` 재실행
 
 **원인 3:** `copy-standalone.js`의 [6/6] 단계에서 엔진 파일 복사 실패  
@@ -262,3 +276,31 @@ binaryTargets = ["native", "windows", "linux-musl-arm64-openssl-3.0.x"]
 `DATABASE_URL`이 외부 PostgreSQL(Neon 등)을 가리키므로 배포 환경에서 DB 접근이 가능해야 합니다.
 
 **오프라인 환경에서 사용하려면:** SQLite로 전환하거나 로컬 PostgreSQL을 함께 배포하세요.
+
+---
+
+## ONVIF 카메라 지원 (electron/main.js)
+
+`ptzcontroller_desktop/electron/main.js`에는 ONVIF SOAP 통신이 내장되어 있습니다.
+
+### 인증 자동 협상
+
+| 시도 순서 | 인증 방식 | 대상 카메라 |
+|-----------|-----------|-------------|
+| 1차 | 인증 없음 (plain) | 인증 불필요 카메라 |
+| 2차 | HTTP Digest Auth | 삼성 iPolis, 한화비전 |
+| 3차 | HTTP Basic Auth | 일부 저가 IP 카메라 |
+
+### Profile Token 자동 조회
+
+카메라 연결 시 `profileToken`이 비어 있으면 `GetProfiles`로 자동 조회합니다. (5분 캐시)
+
+### 토큰 인증 중 메시지 버퍼링
+
+WebSocket 연결 시 토큰 검증(HTTP 요청) 동안 도착하는 메시지를 버퍼에 저장하고,
+인증 완료 후 순서대로 처리합니다. (`connect` 메시지 유실 방지)
+
+### 주의: ptz-proxy-electron과의 차이
+
+`ptzcontroller_desktop/electron/main.js`는 **데스크톱 앱 전용** 내장 proxy입니다.
+별도 ptz-proxy-electron 없이 Electron 앱 자체에서 WebSocket 서버를 구동합니다.

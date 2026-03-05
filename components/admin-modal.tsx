@@ -16,6 +16,7 @@ interface UserRow {
   id: string;
   email: string;
   name: string | null;
+  organization: string | null;
   role: string;
   createdAt: string;
 }
@@ -42,11 +43,13 @@ export default function AdminModal({ onClose }: AdminModalProps) {
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newName, setNewName] = useState('');
+  const [newOrg, setNewOrg] = useState('');
   const [newRole, setNewRole] = useState<'user' | 'admin'>('user');
   const [showNewPw, setShowNewPw] = useState(false);
 
   // 편집 폼
   const [editName, setEditName] = useState('');
+  const [editOrg, setEditOrg] = useState('');
   const [editRole, setEditRole] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [showEditPw, setShowEditPw] = useState(false);
@@ -82,13 +85,13 @@ export default function AdminModal({ onClose }: AdminModalProps) {
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: newEmail, password: newPassword, name: newName, role: newRole }),
+        body: JSON.stringify({ email: newEmail, password: newPassword, name: newName, organization: newOrg, role: newRole }),
       });
       const data = await res.json();
       if (!res.ok) { setUserMsg({ type: 'err', text: data.error ?? 'Failed' }); return; }
       setUserMsg({ type: 'ok', text: `User "${newEmail}" created.` });
       setShowAddUser(false);
-      setNewEmail(''); setNewPassword(''); setNewName(''); setNewRole('user');
+      setNewEmail(''); setNewPassword(''); setNewName(''); setNewOrg(''); setNewRole('user');
       fetchUsers();
     } catch {
       setUserMsg({ type: 'err', text: 'Network error' });
@@ -98,6 +101,7 @@ export default function AdminModal({ onClose }: AdminModalProps) {
   function startEdit(u: UserRow) {
     setEditUser(u);
     setEditName(u.name ?? '');
+    setEditOrg(u.organization ?? '');
     setEditRole(u.role);
     setEditPassword('');
   }
@@ -106,7 +110,7 @@ export default function AdminModal({ onClose }: AdminModalProps) {
     if (!editUser) return;
     setEditSaving(true);
     try {
-      const body: Record<string, string> = { id: editUser.id, name: editName, role: editRole };
+      const body: Record<string, string> = { id: editUser.id, name: editName, organization: editOrg, role: editRole };
       if (editPassword) body.password = editPassword;
       const res = await fetch('/api/admin/users', {
         method: 'PATCH',
@@ -277,9 +281,15 @@ export default function AdminModal({ onClose }: AdminModalProps) {
                             className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
                         </div>
                         <div>
-                          <label className="text-xs text-muted-foreground">이름</label>
-                          <input value={newName} onChange={e => setNewName(e.target.value)}
+                          <label className="text-xs text-muted-foreground">이름 *</label>
+                          <input required value={newName} onChange={e => setNewName(e.target.value)}
                             placeholder="홍길동"
+                            className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground">회사/소속 *</label>
+                          <input required value={newOrg} onChange={e => setNewOrg(e.target.value)}
+                            placeholder="(주)예시회사"
                             className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
                         </div>
                         <div className="relative">
@@ -327,6 +337,11 @@ export default function AdminModal({ onClose }: AdminModalProps) {
                             className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
                         </div>
                         <div>
+                          <label className="text-xs text-muted-foreground">회사/소속</label>
+                          <input value={editOrg} onChange={e => setEditOrg(e.target.value)}
+                            className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                        </div>
+                        <div>
                           <label className="text-xs text-muted-foreground">권한</label>
                           <select value={editRole} onChange={e => setEditRole(e.target.value)}
                             className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-primary">
@@ -368,7 +383,7 @@ export default function AdminModal({ onClose }: AdminModalProps) {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium truncate">{u.email}</p>
-                          <p className="text-xs text-muted-foreground">{u.name ?? '-'} · {u.role === 'admin' ? '관리자' : '일반'}</p>
+                          <p className="text-xs text-muted-foreground">{u.name ?? '-'} · {u.organization ?? '-'} · {u.role === 'admin' ? '관리자' : '일반'}</p>
                         </div>
                         <div className="flex gap-1.5">
                           <button onClick={() => startEdit(u)}

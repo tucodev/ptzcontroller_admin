@@ -43,7 +43,7 @@ ZIP 파일 동적 생성하여 응답
 const downloadLinks = [
   {
     name: 'GitHub Releases',
-    url: 'https://github.com/ptz-controller/ptz-proxy/releases/latest',  // ← GitHub URL 수정
+    url: 'https://github.com/ptzcontroller_admin/ptz-proxy/releases/latest',  // ← GitHub URL 수정
     description: 'Latest stable release',
     icon: '📦'
   },

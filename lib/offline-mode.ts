@@ -38,6 +38,9 @@ const CACHE_TTL_MS = 30_000; // 30초마다 재확인
  * DB 연결 가능 여부 확인
  * 결과는 30초간 캐시되므로 반복 호출에도 성능 영향 없음
  */
+/** DB 연결 확인 타임아웃 (ms). 이 시간 내 응답 없으면 오프라인으로 판단 */
+const DB_CHECK_TIMEOUT_MS = 3_000;
+
 export async function isDbAvailable(): Promise<boolean> {
   const now = Date.now();
   // 캐시 유효 시간 내라면 캐시된 결과 반환
@@ -46,11 +49,18 @@ export async function isDbAvailable(): Promise<boolean> {
   }
 
   try {
-    await prisma.$queryRaw`SELECT 1`;
+    // 타임아웃과 DB 쿼리 중 먼저 완료되는 쪽으로 결정
+    // → DB 연결이 끊겼을 때 수십 초씩 대기하는 문제 해결
+    await Promise.race([
+      prisma.$queryRaw`SELECT 1`,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('DB check timeout')), DB_CHECK_TIMEOUT_MS)
+      ),
+    ]);
     _dbAvailable = true;
-  } catch {
+  } catch (err) {
     _dbAvailable = false;
-    console.warn('[OfflineMode] DB connection failed — offline mode activated');
+    console.warn('[OfflineMode] DB connection failed — offline mode activated:', (err as Error).message);
   }
 
   _lastCheckTime = Date.now();

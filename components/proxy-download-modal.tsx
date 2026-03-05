@@ -161,7 +161,7 @@ export function ProxyDownloadModal({ isOpen, onClose, proxyUrl }: ProxyDownloadM
                 /* 업로드 파일 없을 때 기본 링크 */
                 <>
                   <a
-                    href="https://github.com/ptz-controller/ptz-proxy/releases/latest"
+                    href="https://github.com/ptzcontroller_admin/ptz-proxy/releases/latest"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-4 p-4 bg-muted/50 hover:bg-muted border border-border rounded-lg transition-colors group"

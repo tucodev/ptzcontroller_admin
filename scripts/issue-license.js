@@ -17,6 +17,18 @@
  *
  * 환경변수:
  *   LICENSE_SECRET  제공자의 서명 비밀키 (앱의 .env 와 동일 값 사용)
+ *
+ *
+ * 라이선스 저장위치
+ *   [개발시]
+ *     ptzcontroller_admin\data
+ *      or
+ *     ptzcontroller_desktop\data
+ *
+ *   ===> [변경] 다음으로 저장하도록 변경되었다.
+ *
+ *       C:\Users\<사용자>\AppData\Roaming\ptzcontroller_desktop\data\offline.ptzlic
+ *
  */
 
 const fs = require("fs");

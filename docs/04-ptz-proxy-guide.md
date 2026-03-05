@@ -220,21 +220,97 @@ Proxy 연결이 5초 내 실패하면 자동으로 다운로드 안내 팝업이
 - 관리자가 업로드한 파일 있음 → 해당 파일 링크 우선 표시
 - 업로드 파일 없음 → 소스 ZIP / GitHub 링크 표시
 
-### 관리자 Proxy 파일 업로드
+---
 
-관리자 계정으로 로그인 → 🛡️ 버튼 → **"Proxy 파일"** 탭
+## ONVIF 카메라 지원
 
-1. `ptz-proxy-setup.exe` 등 빌드된 파일 업로드
-2. 파일은 `public/downloads/` 에 저장
-3. 이후 사용자 팝업에 자동으로 다운로드 링크 표시
+ptz-proxy-electron은 ONVIF 프로토콜을 지원하며, 다양한 제조사의 카메라에 자동으로 대응합니다.
+
+### 인증 방식 자동 협상
+
+카메라 제조사마다 요구하는 인증 방식이 다릅니다. ptz-proxy는 아래 순서로 자동 시도합니다:
+
+| 시도 순서 | 인증 방식 | 대상 카메라 |
+|-----------|-----------|-------------|
+| 1차 | 인증 없음 (plain SOAP) | 인증 불필요 카메라 |
+| 2차 | HTTP Digest Auth | 삼성 iPolis, 한화비전 등 |
+| 3차 | HTTP Basic Auth | 일부 저가 IP 카메라 |
+| 4차 | WS-Security PasswordDigest | Axis, Bosch, Sony 등 표준 ONVIF |
+| 5차 | WS-Security + Basic Auth | 일부 하이브리드 카메라 |
+
+별도 설정 없이 자동으로 올바른 방식이 선택됩니다.
+
+### Profile Token 자동 조회
+
+카메라에 Profile Token을 설정하지 않아도 연결 시 자동으로 조회합니다:
+
+1. 연결 즉시 PTZ 제어 가능 (조회 완료 대기 없음)
+2. 백그라운드에서 `GetCapabilities` → `GetProfiles` 순서로 조회
+3. 조회된 첫 번째 토큰이 자동 적용됨
+4. 조회 결과는 5분간 캐시됨
+
+수동으로 Profile Token을 지정하면 자동 조회를 건너뜁니다.
+
+### 삼성/한화비전 iPolis 카메라 특이사항
+
+- HTTP Digest Auth 필수 (`realm="iPolis"`)
+- WS-Security 헤더가 있으면 SOAP Fault로 거부함
+- Profile Token 형식: `DefaultProfile-01-0`, `DefaultProfile-02-0` 등
+
+### ONVIF 서비스 엔드포인트
+
+| 서비스 | 경로 |
+|--------|------|
+| Device | `/onvif/device_service` |
+| Media | `/onvif/media_service` (GetCapabilities로 자동 확인) |
+| PTZ | `/onvif/ptz_service` |
+
+---
+
+## 토큰 인증
+
+ptz-proxy-electron은 WebSocket 연결 시 JWT 기반 토큰 인증을 지원합니다.
+
+### 설정
+
+앱 설정에서 **"토큰 인증"** 토글 ON/OFF:
+
+- **OFF (기본)**: 토큰 없이 누구나 WebSocket 연결 가능
+- **ON**: 웹앱에서 발급한 토큰이 있어야만 연결 허용
+
+### 동작 흐름 (토큰 인증 ON 시)
+
+```
+1. 브라우저 → /api/ptz/connect (POST)
+2. 웹앱 서버 → HMAC-SHA256 서명 토큰 생성 (TTL 60초)
+3. 웹앱 서버 → proxyUrl?token=xxx 반환
+4. 브라우저 → ws://proxy:9902?token=xxx 연결
+5. ptz-proxy → GET /api/proxy-token/verify?token=xxx 검증
+6. 검증 통과 → 연결 허용 / 실패 → 4401 거부
+```
+
+### 인증 중 메시지 버퍼링
+
+토큰 검증(HTTP 요청) 중에 브라우저가 보내는 메시지가 유실되지 않도록,
+연결 즉시 메시지를 버퍼링하고 인증 완료 후 순서대로 처리합니다.
+
+### 관련 파일 (웹앱)
+
+| 파일 | 역할 |
+|------|------|
+| `lib/proxy-token.ts` | 토큰 생성/검증 (HMAC-SHA256, TTL 60초) |
+| `app/api/ptz/connect/route.ts` | 연결 시 토큰 생성 후 URL에 포함 |
+| `app/api/proxy-token/verify/route.ts` | ptz-proxy의 토큰 검증 요청 처리 |
+
+> **환경변수**: `PROXY_TOKEN_SECRET` 설정 권장 (미설정 시 `NEXTAUTH_SECRET` 사용)
 
 ---
 
 ## WebSocket API
 
-서버 주소: `ws://[호스트IP]:9902`
+서버 주소: `ws://[호스트IP]:9902` (토큰 인증 ON 시: `ws://[호스트IP]:9902?token=xxx`)
 
-### 카메라 TCP 연결
+### 카메라 연결
 
 ```json
 {
@@ -243,10 +319,25 @@ Proxy 연결이 5초 내 실패하면 자동으로 다운로드 안내 팝업이
         "host": "192.168.1.100",
         "port": 4001,
         "protocol": "pelcod",
-        "address": 1
+        "address": 1,
+        "username": "",
+        "password": "",
+        "profileToken": ""
     }
 }
 ```
+
+**protocol 값:**
+
+| 값 | 설명 |
+|----|------|
+| `pelcod` | PelcoD 프로토콜 (RS-485 / TCP) |
+| `ujin` | Ujin 프로토콜 (PelcoD 변형) |
+| `onvif` | ONVIF SOAP over HTTP |
+
+**ONVIF 전용 필드:**
+- `username`, `password`: 카메라 계정
+- `profileToken`: 프로파일 토큰 (비워두면 자동 조회)
 
 ### PTZ 명령
 
@@ -269,11 +360,13 @@ Proxy 연결이 5초 내 실패하면 자동으로 다운로드 안내 팝업이
 | `tilt` | `up` / `down` | 상하 회전 |
 | `zoom` | `in` / `out` | 줌 |
 | `focus` | `near` / `far` | 초점 |
-| `preset` | `goto` / `set` | 프리셋 이동/저장 |
+| `preset` | `goto` | 프리셋 이동 |
 | `stop` | — | 정지 |
 
-### Raw 패킷 직접 전송
+### 기타 명령
 
+
+RAW 패킷 ---> 구현확인 필요..
 ```json
 {
     "type": "raw",
@@ -292,10 +385,9 @@ Proxy 연결이 5초 내 실패하면 자동으로 다운로드 안내 팝업이
 
 | type | 설명 |
 |------|------|
-| `welcome` | 최초 연결 시 서버 정보 |
-| `connected` | 카메라 TCP 연결 성공 |
-| `command_sent` | PTZ 명령 전송 완료 + packet |
-| `raw_sent` | Raw 패킷 전송 완료 |
+| `connected` | 카메라 연결 성공 |
+| `profiles` | ONVIF GetProfiles 자동 조회 완료 + 토큰 목록 |
+| `command_sent` | PTZ 명령 전송 완료 |
 | `pong` | ping 응답 |
 | `disconnected` | 연결 해제 완료 |
 | `error` | 오류 메시지 |
@@ -315,12 +407,28 @@ WebSocket connection to 'ws://localhost:9902' failed
 3. 방화벽에서 9902 포트 허용 여부 확인
 4. 다른 PC에서 접속 시 Proxy PC의 IP 주소 확인
 
-### 카메라 TCP 연결 실패 (ECONNREFUSED)
+### 토큰 인증 실패 (4401)
 
-1. 카메라 IP와 포트 확인
-2. 카메라 전원 및 네트워크 연결 확인
-3. 카메라와 Proxy PC가 같은 네트워크인지 확인
-4. 방화벽 설정 확인
+1. 웹앱 서버가 실행 중인지 확인
+2. ptz-proxy 설정의 **Web App URL** 이 정확한지 확인
+3. `PROXY_TOKEN_SECRET` 또는 `NEXTAUTH_SECRET` 환경변수 설정 확인
+4. 토큰 TTL(60초) 만료 → 재연결 시도
+
+### ONVIF 카메라 연결 실패 (NoProfile)
+
+1. Profile Token 필드를 **비워두면** 자동 조회됨 (권장)
+2. 수동 입력 시 카메라의 실제 토큰 확인 필요
+   - 삼성/한화비전: `DefaultProfile-01-0` 형태
+   - ODM(ONVIF Device Manager) 등으로 실제 토큰 확인 가능
+3. ptz-proxy 로그에서 `프로파일 토큰:` 출력 확인
+
+### ONVIF PTZ가 동작하지 않음 (SOAP Fault)
+
+1. ptz-proxy 로그의 `명령 오류:` 메시지 확인
+2. 오류 로그 파일: `%AppData%\ptz-proxy-electron\onvif-error.log`
+   - SOAP Fault가 발생한 경우에만 기록됨
+3. 카메라 IP, 포트(보통 80), 계정 정보 재확인
+4. 인증 방식은 자동으로 협상되므로 별도 설정 불필요
 
 ### HTTPS 환경에서 ws:// 차단 (혼합 콘텐츠)
 
@@ -329,7 +437,7 @@ WebSocket connection to 'ws://localhost:9902' failed
 - 해결: nginx 등으로 `wss://` (WebSocket Secure) 프록시 구성
 - 또는: 브라우저 설정에서 해당 사이트의 혼합 콘텐츠 허용
 
-### 카메라가 응답하지 않음
+### 카메라가 응답하지 않을 때 확인할 것 
 
 1. 프로토콜 설정 확인 (PelcoD / ujin)
 2. 장치 주소(Address) 확인 (카메라 DIP 스위치)

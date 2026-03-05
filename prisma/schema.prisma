@@ -12,18 +12,43 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
+  id            String       @id @default(cuid())
   name          String?
-  email         String    @unique
+  organization  String?      // 회사/소속
+  email         String       @unique
   password      String
-  role          String    @default("user")
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  role          String       @default("user")
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  configs       UserConfig[]
 }
 
-model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
+// ── 사용자별 카메라/프리셋/설정 저장 (STORAGE_MODE=db 시 사용) ─
+// STORAGE_MODE=file 이면 이 테이블은 사용되지 않음.
+// key: 'cameras' | 'presets' | 'settings'
+// value: JSON 직렬화된 데이터
+model UserConfig {
+  id        String   @id @default(cuid())
+  userId    String
+  key       String
+  value     String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key], name: "userId_key")
+  @@index([userId])
 }
+
+// ── Session 모델 제거 이유 ────────────────────────────────────
+// auth.ts 에서 strategy: 'jwt' 를 사용하므로 세션이 DB에 저장되지 않음.
+// PrismaAdapter 는 DB 세션 전략(strategy:'database')에서만 Session 테이블을 사용.
+// JWT 전략에서 Session 모델을 선언하면 불필요한 테이블이 생성되어 혼란을 줌.
+// 만약 향후 DB 세션 전략으로 전환 시 아래 모델을 복원하고 auth.ts 의 strategy 를 변경할 것.
+//
+// model Session {
+//   id           String   @id @default(cuid())
+//   sessionToken String   @unique
+//   userId       String
+//   expires      DateTime
+// }

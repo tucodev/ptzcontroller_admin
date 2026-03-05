@@ -89,7 +89,7 @@ module.exports = nextConfig;
 ### 5. `cloudtype.yaml` 확인
 
 ```yaml
-name: ptz-controller
+name: ptzcontroller_admin
 app: ptzcontroller_admin
 
 services:
@@ -151,7 +151,7 @@ git init
 git add .
 git commit -m "Initial commit"
 
-git remote add origin https://github.com/username/ptz-controller.git
+git remote add origin https://github.com/username/ptzcontroller_admin.git
 git push -u origin main
 ```
 

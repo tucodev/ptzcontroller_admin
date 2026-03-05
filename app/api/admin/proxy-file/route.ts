@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
-import { requireAdmin } from '@/lib/auth-utils';
+import { requireSession, requireAdmin } from '@/lib/auth-utils';
 import fs from 'fs';
 import path from 'path';
 
@@ -19,12 +17,10 @@ function ensureDownloadsDir() {
 
 // GET: 업로드된 proxy 파일 목록
 //   - 로그인한 사용자 전체 조회 가능 (Proxy 다운로드 팝업에서 사용)
-//   - admin 이 아니어도 목록 확인은 허용
+//   - admin 이 아니어도 목록 확인은 허용 (오프라인 모드 포함)
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const { error } = await requireSession();
+  if (error) return error;
 
   try {
     ensureDownloadsDir();

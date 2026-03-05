@@ -157,7 +157,7 @@ yarn prisma migrate dev --name init
           ? Are you sure you want to reset your database? All data will be lost. » (y/N) y
 ```
 
-# Seed 데이터 생성 (테스트 계정 john@doe.com)
+# Seed 데이터 생성 (테스트 계정 tyche@tyche.ooo)
 
 ```bash
 # 샘플 로그인 정보 1 계정 등록함

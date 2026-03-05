@@ -1,6 +1,6 @@
 {
   "defaultProtocol": "pelcod",
-  "defaultOperationMode": "proxy",
+  "defaultOperationMode": "direct",
   "proxyPort": 9902,
   "logLevel": "info",
   "theme": "dark"

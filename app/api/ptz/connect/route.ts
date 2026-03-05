@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSession } from '@/lib/auth-utils';
-import { ProtocolFactory } from '@/lib/protocols/protocol-factory';
-import { getCamera } from '@/lib/config-manager';
+import { requireSession, getSessionUser } from '@/lib/auth-utils';
+import { getCamerasAsync } from '@/lib/config-manager';
+import { createProxyToken } from '@/lib/proxy-token';
+
+function resolveUserId(session: Awaited<ReturnType<typeof requireSession>>['session']): string {
+  if (!session) return 'offline';
+  const user = getSessionUser(session as { user?: unknown });
+  const id = user.id;
+  if (!id || typeof id !== 'string' || id.trim() === '') return 'offline';
+  return id;
+}
 
 export async function POST(request: NextRequest) {
-  const { error } = await requireSession();
+  const { session, error } = await requireSession();
   if (error) return error;
 
   try {
@@ -14,31 +22,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Camera ID is required' }, { status: 400 });
     }
 
-    const camera = getCamera(cameraId);
+    const userId  = resolveUserId(session);
+    const cameras = await getCamerasAsync(userId);
+    const camera  = cameras.find((c) => c.id === cameraId);
+
     if (!camera) {
       return NextResponse.json({ error: 'Camera not found' }, { status: 404 });
     }
 
-    // ─── Proxy 모드 ────────────────────────────────────────
-    // proxyUrl 이 비어있으면 기본값(localhost:9902) 사용
-    // 실제 WebSocket 연결은 클라이언트(dashboard)에서 직접 수행
-    if (camera.operationMode === 'proxy') {
-      const proxyUrl = camera.proxyUrl?.trim()
-        ? camera.proxyUrl
-        : 'ws://localhost:9902';
+    const proxyUrl   = camera.proxyUrl?.trim() || 'ws://localhost:9902';
 
-      return NextResponse.json({
-        success: true,
-        mode: 'proxy',
-        proxyUrl,
-        message: 'Use WebSocket proxy for connection',
-      });
-    }
+    // tokenAuth 활성화 여부와 무관하게 항상 토큰 생성
+    // (ptz-proxy가 tokenAuth=off면 토큰을 무시하고, on이면 검증)
+    const proxyToken        = createProxyToken(cameraId, userId);
+    const separator         = proxyUrl.includes('?') ? '&' : '?';
+    const proxyUrlWithToken = `${proxyUrl}${separator}token=${encodeURIComponent(proxyToken)}`;
 
-    // ─── Direct 모드 ───────────────────────────────────────
-    const protocol = ProtocolFactory.getOrCreateProtocol(camera);
-    const result   = await protocol.connect();
-    return NextResponse.json(result);
+    return NextResponse.json({
+      success:  true,
+      mode:     'proxy',
+      proxyUrl: proxyUrlWithToken,
+    });
   } catch (err) {
     console.error('Connect error:', err);
     return NextResponse.json({ error: 'Failed to connect' }, { status: 500 });

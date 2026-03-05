@@ -1,41 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
-import { getSettings, saveSettings } from '@/lib/config-manager';
+import { requireSession, getSessionUser } from '@/lib/auth-utils';
+import { getSettingsAsync, saveSettingsAsync } from '@/lib/config-manager';
+
+function resolveUserId(session: Awaited<ReturnType<typeof requireSession>>['session']): string {
+  if (!session) return 'offline';
+  const user = getSessionUser(session as { user?: unknown });
+  const id = user.id;
+  if (!id || typeof id !== 'string' || id.trim() === '') return 'offline';
+  return id;
+}
 
 export async function GET() {
-  try {
-    const session = await getServerSession(authOptions);
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  const { session, error } = await requireSession();
+  if (error) return error;
 
-    const settings = getSettings();
+  const userId = resolveUserId(session);
+  try {
+    const settings = await getSettingsAsync(userId);
     return NextResponse.json({ settings });
-  } catch (error) {
-    console.error('Get settings error:', error);
-    return NextResponse.json(
-      { error: 'Failed to get settings' },
-      { status: 500 }
-    );
+  } catch (e) {
+    console.error('Get settings error:', e);
+    return NextResponse.json({ error: 'Failed to get settings' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    const session = await getServerSession(authOptions);
-    if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  const { session, error } = await requireSession();
+  if (error) return error;
 
+  const userId = resolveUserId(session);
+  try {
     const body = await request.json();
-    const updated = saveSettings(body);
+    const updated = await saveSettingsAsync(body, userId);
     return NextResponse.json({ success: true, settings: updated });
-  } catch (error) {
-    console.error('Save settings error:', error);
-    return NextResponse.json(
-      { error: 'Failed to save settings' },
-      { status: 500 }
-    );
+  } catch (e) {
+    console.error('Save settings error:', e);
+    return NextResponse.json({ error: 'Failed to save settings' }, { status: 500 });
   }
 }

@@ -19,9 +19,14 @@ export const authOptions: NextAuthOptions = {
         }
 
         try {
-          const user = await prisma.user.findUnique({
-            where: { email: credentials.email },
-          });
+          // DB 연결 타임아웃 (3초) — 연결 불가 시 빠르게 null 반환
+          const DB_AUTH_TIMEOUT_MS = 3_000;
+          const user = await Promise.race([
+            prisma.user.findUnique({ where: { email: credentials.email } }),
+            new Promise<null>((resolve) =>
+              setTimeout(() => resolve(null), DB_AUTH_TIMEOUT_MS)
+            ),
+          ]);
 
           if (!user || !user?.password) {
             return null;

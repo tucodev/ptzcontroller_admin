@@ -26,6 +26,7 @@ PTZ Controller는 PelcoD, ONVIF, ujin 등 다양한 프로토콜을 지원하는
 - **PTZ 제어**: Pan, Tilt, Zoom, Focus 제어
 - **프리셋 관리**: 최대 255개 프리셋 저장/호출
 - **두 가지 동작 모드**: Direct 모드 / Proxy 모드
+- **ONVIF 자동 인증**: 제조사별 인증 방식 자동 협상 (삼성 iPolis, Axis, Bosch 등)
 - **Hex 모니터**: 실시간 TX/RX 패킷 표시
 - **테마 지원**: Light, Dark, System
 - **관리자 기능**: 사용자 관리, PTZ Proxy 배포 파일 업로드
@@ -36,25 +37,25 @@ PTZ Controller는 PelcoD, ONVIF, ujin 등 다양한 프로토콜을 지원하는
 
 ### 3가지 구성 요소
 
-| 구성 요소 | 폴더 | 설명 |
-|-----------|------|------|
-| **Web App** | `ptzcontroller_admin/` | Next.js 웹 서버 (UI + API) |
-| **Desktop App** | `ptzcontroller-desktop/` | Electron 래퍼 (Windows EXE) |
-| **PTZ Proxy** | `ptz-proxy-electron/` | WebSocket 프록시 (GUI 트레이 앱) |
+| 구성 요소       | 폴더                     | 설명                             |
+| --------------- | ------------------------ | -------------------------------- |
+| **Web App**     | `ptzcontroller_admin/`   | Next.js 웹 서버 (UI + API)       |
+| **Desktop App** | `ptzcontroller_desktop/` | Electron 래퍼 (Windows EXE)      |
+| **PTZ Proxy**   | `ptz-proxy-electron/`    | WebSocket 프록시 (GUI 트레이 앱) |
 
 ### 폴더 구조 (전제 조건)
 
 ```
 (상위 폴더)/
 ├── ptzcontroller_admin/       ← Next.js 웹앱 소스
-└── ptzcontroller-desktop/     ← Electron 데스크톱 래퍼
+└── ptzcontroller_desktop/     ← Electron 데스크톱 래퍼
 └── ptz-proxy-electron/        ← Electron PTZ Proxy
 ```
 
 ### 웹 브라우저 요구사항
 
-- Chrome 90+, 
-- Firefox 88+, 
+- Chrome 90+,
+- Firefox 88+,
 - Safari 14+, Edge 90+
 
 ---
@@ -96,11 +97,11 @@ PTZ Controller는 PelcoD, ONVIF, ujin 등 다양한 프로토콜을 지원하는
 
 ### 헤더
 
-| 버튼 | 설명 |
-|------|------|
+| 버튼       | 설명                                  |
+| ---------- | ------------------------------------- |
 | 🛡️ (amber) | 관리자 설정 — **admin 계정에만 표시** |
-| ⚙️ | 앱 설정 (테마, 기본 프로토콜 등) |
-| 로그아웃 | 세션 종료 |
+| ⚙️         | 앱 설정 (테마, 기본 프로토콜 등)      |
+| 로그아웃   | 세션 종료                             |
 
 ### 왼쪽: 카메라 목록
 
@@ -121,7 +122,8 @@ PTZ Controller는 PelcoD, ONVIF, ujin 등 다양한 프로토콜을 지원하는
 
 - TX(전송) / RX(수신) 패킷 실시간 표시
 - 패킷 내용 16진수 표시
-- 최대 500개 로그 유지, Clear 버튼으로 초기화
+- 최대 500개 로그 유지
+- ONVIF 카메라는 HTTP 통신이므로 TX가 표시되지 않음 (정상), Clear 버튼으로 초기화
 
 ---
 
@@ -131,27 +133,32 @@ PTZ Controller는 PelcoD, ONVIF, ujin 등 다양한 프로토콜을 지원하는
 
 ### 기본 설정
 
-| 필드 | 설명 | 예시 |
-|------|------|------|
-| Camera Name | 카메라 식별 이름 | 1번 카메라 |
-| Protocol | 통신 프로토콜 | PelcoD, ONVIF, ujin, Custom |
-| Operation Mode | 동작 모드 | Direct 또는 Proxy |
+| 필드           | 설명             | 예시                        |
+| -------------- | ---------------- | --------------------------- |
+| Camera Name    | 카메라 식별 이름 | 1번 카메라                  |
+| Protocol       | 통신 프로토콜    | PelcoD, ONVIF, ujin, Custom |
+| Operation Mode | 동작 모드        | Direct 또는 Proxy           |
 
 ### Direct 모드 설정
 
-| 필드 | 설명 | 예시 |
-|------|------|------|
-| Host/IP | 카메라 IP 주소 | 192.168.1.100 |
-| Port | 통신 포트 | 4001 |
-| Device Address | PelcoD/ujin 장치 주소 (1-255) | 1 |
-| Username | ONVIF 사용자명 | admin |
-| Password | ONVIF 비밀번호 | — |
+| 필드           | 설명                          | 예시          |
+| -------------- | ----------------------------- | ------------- |
+| Host/IP        | 카메라 IP 주소                | 192.168.1.100 |
+| Port           | 통신 포트                     | 4001          |
+| Device Address | PelcoD/ujin 장치 주소 (1-255) | 1             |
+| Username       | ONVIF 사용자명                | admin         |
+| Password       | ONVIF 비밀번호                | —             |
 
 ### Proxy 모드 설정
 
-| 필드 | 설명 | 예시 |
-|------|------|------|
+| 필드                | 설명                | 예시                |
+| ------------------- | ------------------- | ------------------- |
 | Proxy WebSocket URL | ptz-proxy 서버 주소 | ws://localhost:9902 |
+| Username | ONVIF 사용자명 | admin |
+| Password | ONVIF 비밀번호 | — |
+| Profile Token | ONVIF 프로파일 토큰 | 비워두면 자동 조회 |
+
+> **ONVIF Profile Token**: 비워두면 연결 시 카메라에서 자동으로 조회하여 적용합니다.
 
 ---
 
@@ -190,13 +197,13 @@ PTZ Controller는 PelcoD, ONVIF, ujin 등 다양한 프로토콜을 지원하는
 
 헤더의 ⚙️ 아이콘 클릭 시 설정 모달이 나타납니다.
 
-| 설정 | 설명 | 옵션 |
-|------|------|------|
-| Default Protocol | 새 카메라 추가 시 기본 프로토콜 | PelcoD, ONVIF, ujin, Custom |
-| Default Operation Mode | 기본 동작 모드 | Direct, Proxy |
-| Proxy WebSocket Port | Proxy 기본 포트 | 9902 |
-| Log Level | 서버 로그 수준 | Debug, Info, Warning, Error |
-| Theme | UI 테마 | Light, Dark, System |
+| 설정                   | 설명                            | 옵션                        |
+| ---------------------- | ------------------------------- | --------------------------- |
+| Default Protocol       | 새 카메라 추가 시 기본 프로토콜 | PelcoD, ONVIF, ujin, Custom |
+| Default Operation Mode | 기본 동작 모드                  | Direct, Proxy               |
+| Proxy WebSocket Port   | Proxy 기본 포트                 | 9902                        |
+| Log Level              | 서버 로그 수준                  | Debug, Info, Warning, Error |
+| Theme                  | UI 테마                         | Light, Dark, System         |
 
 ### 테마 변경
 
@@ -216,6 +223,7 @@ PTZ Controller는 PelcoD, ONVIF, ujin 등 다양한 프로토콜을 지원하는
 ```
 
 **사용 시나리오:**
+
 - PTZ 카메라가 서버에서 직접 접근 가능할 때
 - 클라우드 서버(Cloudtype 등)에서 운영할 때
 
@@ -227,10 +235,12 @@ PTZ Controller는 PelcoD, ONVIF, ujin 등 다양한 프로토콜을 지원하는
 ```
 
 **사용 시나리오:**
+
 - PTZ 카메라가 Private 네트워크에 있을 때
 - 사용자 PC에서만 카메라 접근 가능할 때
 
 **Proxy 모드 사용 방법:**
+
 1. PTZ 카메라에 접근 가능한 PC에서 **ptz-proxy-electron** 실행
 2. 카메라 추가 시 Operation Mode를 **"Proxy"** 로 선택
 3. Proxy WebSocket URL 입력 (예: `ws://localhost:9902`)
@@ -251,12 +261,12 @@ Proxy 연결이 5초 내에 실패하면 자동으로 다운로드 안내 팝업
 
 ### 사용자 관리 탭
 
-| 기능 | 설명 |
-|------|------|
+| 기능        | 설명                                          |
+| ----------- | --------------------------------------------- |
 | 사용자 목록 | 전체 사용자 조회 (이메일, 이름, 권한, 가입일) |
 | 사용자 추가 | 이메일, 이름, 비밀번호, 권한(user/admin) 설정 |
-| 사용자 편집 | 이름, 권한, 비밀번호 변경 |
-| 사용자 삭제 | 계정 삭제 (자기 자신 삭제 불가) |
+| 사용자 편집 | 이름, 권한, 비밀번호 변경                     |
+| 사용자 삭제 | 계정 삭제 (자기 자신 삭제 불가)               |
 
 ### Proxy 파일 탭
 
@@ -287,15 +297,27 @@ Proxy 연결이 5초 내에 실패하면 자동으로 다운로드 안내 팝업
 ### PTZ가 움직이지 않을 때
 
 1. 연결 상태가 "connected"인지 확인
-2. 장치 주소(Address)가 카메라 설정과 일치하는지 확인
+2. 장치 주소(Address)가 카메라 설정과 일치하는지 확인 (PelcoD/Ujin)
 3. 속도 슬라이더가 0이 아닌지 확인
 4. Hex 모니터에서 TX 패킷이 전송되는지 확인
+
+### ONVIF PTZ가 동작하지 않을 때
+
+1. Profile Token을 **비워두면** 자동 조회됨 (권장)
+2. ptz-proxy 로그에서 `프로파일 토큰:` 출력 확인
+3. 오류 발생 시 `%AppData%\ptz-proxy-electron\onvif-error.log` 확인
+4. 인증 방식은 자동으로 협상되므로 별도 설정 불필요
+
+### Hex 모니터 TX가 공백인 경우
+
+ONVIF 카메라는 HTTP 통신이므로 Hex Monitor TX가 비어있는 것은 **정상**입니다.
+PelcoD / Ujin은 TCP 소켓이므로 TX/RX가 정상 표시됩니다.
 
 ### admin 버튼(🛡️)이 보이지 않을 때
 
 1. 로그아웃 후 재로그인 (JWT 토큰 갱신)
 2. Neon 대시보드 SQL Editor에서 직접 확인:
-   ```sql
-   SELECT email, role FROM "User";
-   UPDATE "User" SET role = 'admin' WHERE email = '본인이메일';
-   ```
+    ```sql
+    SELECT email, role FROM "User";
+    UPDATE "User" SET role = 'admin' WHERE email = '본인이메일';
+    ```

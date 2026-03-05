@@ -11,6 +11,7 @@ import {
     Eye,
     EyeOff,
     UserPlus,
+    Building2,
     WifiOff,
     RefreshCw,
     Download,
@@ -37,6 +38,7 @@ export default function LoginPage() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [name, setName] = useState("");
+    const [organization, setOrganization] = useState("");
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
@@ -53,7 +55,7 @@ export default function LoginPage() {
     const [uploading, setUploading] = useState(false);
     const [downloadingReq, setDownloadingReq] = useState(false);
 
-    // 페이지 로드 시 DB 연결 상태 확인
+    // 페이지 로드 시 DB 연결 상태 확인 (서버 측 타임아웃 3초 이내 응답)
     useEffect(() => {
         checkOfflineStatus();
     }, []);
@@ -64,10 +66,35 @@ export default function LoginPage() {
             const res = await fetch("/api/offline-status");
             const data = await res.json();
             setIsOffline(data.offline);
+            // 오프라인 확인 즉시 라이선스 체크 시작 (Desktop 자동 진입 지원)
+            if (data.offline) {
+                await checkLicenseAutoEnter();
+            }
         } catch {
             setIsOffline(true);
+            await checkLicenseAutoEnter();
         } finally {
             setOfflineChecking(false);
+        }
+    };
+
+    // 오프라인 확인 즉시 유효 라이선스 존재 시 자동으로 licensed 단계로 이동
+    // → Desktop에서 새로고침 없이도 바로 오프라인 모드 진입 가능
+    const checkLicenseAutoEnter = async () => {
+        try {
+            const res = await fetch("/api/license/verify");
+            const data = await res.json();
+            if (data.valid) {
+                setLicenseInfo({ expiresAt: data.expiresAt });
+                setOfflineStep("licensed");
+            } else if (data.reason === "NOT_FOUND") {
+                setOfflineStep("no_license");
+            } else {
+                setLicenseError(data.reason ?? "라이선스가 유효하지 않습니다");
+                setOfflineStep("invalid");
+            }
+        } catch {
+            setOfflineStep("idle");
         }
     };
 
@@ -184,7 +211,7 @@ export default function LoginPage() {
                 const res = await fetch("/api/signup", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ email, password, name }),
+                    body: JSON.stringify({ email, password, name, organization }),
                 });
                 const data = await res.json();
                 if (!res?.ok) {
@@ -447,26 +474,43 @@ export default function LoginPage() {
                         </motion.div>
                     )}
 
-                    {/* ── 로그인 / 회원가입 폼 ─────────────────────── */}
-                    <form onSubmit={handleSubmit} className="space-y-5">
+                    {/* ── 로그인 / 회원가입 폼 (오프라인 시 숨김) ──── */}
+                    {!isOffline && <form onSubmit={handleSubmit} className="space-y-5">
                         {!isLogin && (
-                            <div>
-                                <label className="block text-sm font-medium mb-2">
-                                    Name
-                                </label>
-                                <div className="relative">
-                                    <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                                    <input
-                                        type="text"
-                                        value={name}
-                                        onChange={(e) =>
-                                            setName(e?.target?.value ?? "")
-                                        }
-                                        className="w-full pl-11 pr-4 py-3 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                                        placeholder="Your name"
-                                    />
+                            <>
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">
+                                        이름 <span className="text-destructive">*</span>
+                                    </label>
+                                    <div className="relative">
+                                        <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                                        <input
+                                            type="text"
+                                            value={name}
+                                            required
+                                            onChange={(e) => setName(e?.target?.value ?? "")}
+                                            className="w-full pl-11 pr-4 py-3 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                                            placeholder="홍길동"
+                                        />
+                                    </div>
                                 </div>
-                            </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">
+                                        회사/소속 <span className="text-destructive">*</span>
+                                    </label>
+                                    <div className="relative">
+                                        <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                                        <input
+                                            type="text"
+                                            value={organization}
+                                            required
+                                            onChange={(e) => setOrganization(e?.target?.value ?? "")}
+                                            className="w-full pl-11 pr-4 py-3 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                                            placeholder="(주)예시회사"
+                                        />
+                                    </div>
+                                </div>
+                            </>
                         )}
                         <div>
                             <label className="block text-sm font-medium mb-2">
@@ -519,7 +563,7 @@ export default function LoginPage() {
                         </div>
                         <button
                             type="submit"
-                            disabled={loading || offlineChecking}
+                            disabled={loading}
                             className="w-full py-3 bg-primary hover:bg-primary/90 disabled:bg-primary/50 text-primary-foreground font-medium rounded-lg transition-all flex items-center justify-center gap-2"
                         >
                             {loading ? (
@@ -530,7 +574,7 @@ export default function LoginPage() {
                                 "Create Account"
                             )}
                         </button>
-                    </form>
+                    </form>}
 
                     <div className="mt-6 text-center">
                         <button

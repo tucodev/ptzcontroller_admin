@@ -94,7 +94,7 @@ export default function CameraList({
               <div>
                 <h3 className="font-medium text-sm">{camera?.name ?? 'Unnamed Camera'}</h3>
                 <p className="text-xs text-muted-foreground">
-                  {camera?.protocol?.toUpperCase?.() ?? 'Unknown'} • {camera?.operationMode === 'proxy' ? 'Proxy' : 'Direct'}
+                  {camera?.protocol?.toUpperCase?.() ?? 'Unknown'} • Proxy
                 </p>
               </div>
             </div>

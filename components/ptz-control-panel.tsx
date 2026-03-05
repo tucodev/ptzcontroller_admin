@@ -387,7 +387,7 @@ export default function PTZControlPanel({
 
       {/* Camera Info */}
       <div className="text-xs text-muted-foreground space-y-1">
-        <p>Protocol: {camera.protocol?.toUpperCase() ?? 'Unknown'} | Mode: {camera.operationMode === 'proxy' ? 'Proxy' : 'Direct'}</p>
+        <p>Protocol: {camera.protocol?.toUpperCase() ?? 'Unknown'} | Mode: Proxy</p>
         {camera.host && <p>Host: {camera.host}:{camera.port ?? 'N/A'}</p>}
         {camera.address !== undefined && <p>Address: {camera.address}</p>}
       </div>
