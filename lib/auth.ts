@@ -37,11 +37,18 @@ export const authOptions: NextAuthOptions = {
         const DB_AUTH_TIMEOUT_MS = 3_000;
         
         try {
-          // 온라인 DB 시도 (3초 타임아웃)
-          console.log('[Auth] Attempting online authentication for:', credentials.email);
+          console.log('[Auth] 온라인 로그인 시도:', credentials.email);
           const user = await Promise.race([
             prisma.user.findUnique({ 
-              where: { email: credentials.email } 
+              where: { email: credentials.email },
+              select: {
+                id: true,
+                email: true,
+                name: true,
+                password: true,
+                role: true,
+                organization: true,
+              }
             }),
             new Promise<null>((resolve) =>
               setTimeout(() => resolve(null), DB_AUTH_TIMEOUT_MS)
@@ -51,24 +58,25 @@ export const authOptions: NextAuthOptions = {
           if (user && user.password) {
             const isValid = await bcrypt.compare(credentials.password, user.password);
             if (isValid) {
-              console.log('[Auth] Online login successful:', credentials.email);
+              console.log('[Auth] ✅ 온라인 로그인 성공:', credentials.email);
               
-              // ✅ 온라인 로그인 성공 → 오프라인 DB에 저장
+              // ✅ 반드시 오프라인 DB에 저장 (중요!)
               try {
-                await saveOfflineUser({
+                const savedUser = await saveOfflineUser({
                   email: user.email,
                   name: user.name || 'User',
                   organization: user.organization || undefined,
-                  passwordHash: user.password,
+                  passwordHash: user.password,  // 온라인 DB의 bcrypt 해시
                   role: (user.role as 'user' | 'admin') || 'user',
                   lastOnlineLoginAt: new Date().toISOString(),
                   lastSyncAt: new Date().toISOString(),
                   platform: process.platform,
                   appVersion: process.env.npm_package_version,
                 });
-                console.log('[Auth] Offline user saved:', user.email);
+                console.log('[Auth] ✅ 오프라인 DB 저장 완료:', savedUser.email);
               } catch (err) {
-                console.warn('[Auth] Failed to save offline user:', err);
+                console.error('[Auth] ❌ 오프라인 DB 저장 실패:', err);
+                // 온라인 로그인은 성공했으므로 계속 진행
               }
               
               return {
@@ -77,22 +85,14 @@ export const authOptions: NextAuthOptions = {
                 name: user.name,
                 role: user.role,
               };
-            } else {
-              console.warn('[Auth] Online login failed - invalid password:', credentials.email);
-            }
-          } else {
-            if (user) {
-              console.warn('[Auth] Online login failed - no password hash:', credentials.email);
-            } else {
-              console.warn('[Auth] Online login failed - user not found:', credentials.email);
             }
           }
         } catch (error) {
-          console.error('[Auth] Online DB error:', (error as Error).message);
+          console.error('[Auth] 온라인 DB 에러:', error instanceof Error ? error.message : String(error));
         }
 
         // DB 오프라인 또는 온라인 로그인 실패 → 오프라인 저장소 확인
-        console.log('[Auth] Attempting offline authentication...');
+        console.log('[Auth] 오프라인 로그인 시도 중...');
         try {
           const offlineUser = await verifyOfflinePassword(
             credentials.email,
@@ -101,7 +101,7 @@ export const authOptions: NextAuthOptions = {
           );
           
           if (offlineUser) {
-            console.log('[Auth] Offline login successful:', credentials.email);
+            console.log('[Auth] ✅ 오프라인 로그인 성공:', credentials.email);
             
             // 오프라인 모드 상태 업데이트
             updateOfflineModeStatus(offlineUser.email, true);
@@ -113,17 +113,18 @@ export const authOptions: NextAuthOptions = {
               role: offlineUser.role,
             };
           } else {
-            console.warn('[Auth] Offline login failed:', credentials.email);
+            console.warn('[Auth] ❌ 오프라인 로그인 실패:', credentials.email);
           }
         } catch (err) {
-          console.error('[Auth] Offline authentication error:', err);
+          console.error('[Auth] 오프라인 인증 에러:', err instanceof Error ? err.message : String(err));
         }
 
-        console.warn('[Auth] Login failed for:', credentials.email);
+        console.warn('[Auth] ❌ 로그인 실패 (온라인/오프라인 모두):', credentials.email);
         return null;
       },
     }),
   ],
+
   session: {
     strategy: 'jwt',
     maxAge: 24 * 60 * 60, // 24 hours

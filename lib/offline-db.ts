@@ -306,74 +306,92 @@ export function saveOfflineUser(
 /**
  * 비밀번호 검증
  */
+/**
+ * 비밀번호 검증 (✅ 개선 버전)
+ */
 export async function verifyOfflinePassword(
-  email: string,
-  password: string,
-  bcryptModule: any
+    email: string,
+    password: string,
+    bcryptModule: any,
 ): Promise<OfflineUserRecord | null> {
-  const user = getOfflineUser(email);
-  if (!user) return null;
-  
-  // 계정 잠금 확인
-  if (user.lockedUntil) {
-    const lockTime = new Date(user.lockedUntil);
-    if (lockTime > new Date()) {
-      console.warn('[OfflineDB] Account locked until:', user.lockedUntil);
-      return null;
+    const user = getOfflineUser(email);
+    
+    if (!user) {
+        console.warn('[OfflineDB] 사용자 없음:', email);
+        return null;
     }
-  }
-  
-  // 비활성 계정 확인
-  if (user.isActive !== 1) {
-    console.warn('[OfflineDB] Account is inactive');
-    return null;
-  }
-  
-  // 비밀번호 검증
-  const isValid = await bcryptModule.compare(password, user.passwordHash);
-  
-  if (!isValid) {
-    // 실패 횟수 증가
-    const failedCount = (user.failedLoginAttempts ?? 0) + 1;
-    const shouldLock = failedCount >= 5;
     
-    const db = getDb();
-    const updateStmt = db.prepare(`
-      UPDATE offline_users
-      SET 
-        failedLoginAttempts = ?,
-        lastFailedLoginAt = ?,
-        lockedUntil = ?
-      WHERE email = ?
-    `);
+    // 계정 잠금 확인
+    if (user.lockedUntil) {
+        const lockTime = new Date(user.lockedUntil);
+        if (lockTime > new Date()) {
+            console.warn('[OfflineDB] 계정 잠금 (해제 시간):', user.lockedUntil);
+            return null;
+        }
+    }
     
-    updateStmt.run(
-      failedCount,
-      new Date().toISOString(),
-      shouldLock ? new Date(Date.now() + 30 * 60 * 1000).toISOString() : null,
-      email
-    );
+    // 비활성 계정 확인
+    if (user.isActive !== 1) {
+        console.warn('[OfflineDB] 비활성 계정:', email);
+        return null;
+    }
     
-    console.warn('[OfflineDB] Failed login attempt for:', email, `(${failedCount}/5)`);
-    return null;
-  }
-  
-  // 로그인 성공
-  const db = getDb();
-  const successStmt = db.prepare(`
-    UPDATE offline_users
-    SET 
-      failedLoginAttempts = 0,
-      lastFailedLoginAt = NULL,
-      lockedUntil = NULL,
-      lastOnlineLoginAt = ?,
-      updatedAt = ?
-    WHERE email = ?
-  `);
-  
-  successStmt.run(new Date().toISOString(), new Date().toISOString(), email);
-  
-  return getOfflineUser(email);
+    // 비밀번호 검증
+    try {
+        const isValid = await bcryptModule.compare(password, user.passwordHash);
+        
+        if (!isValid) {
+            const failedCount = (user.failedLoginAttempts ?? 0) + 1;
+            const shouldLock = failedCount >= 5;
+            
+            const db = getDb();
+            const updateStmt = db.prepare(`
+                UPDATE offline_users
+                SET 
+                    failedLoginAttempts = ?,
+                    lastFailedLoginAt = ?,
+                    lockedUntil = ?
+                WHERE email = ?
+            `);
+            
+            updateStmt.run(
+                failedCount,
+                new Date().toISOString(),
+                shouldLock ? new Date(Date.now() + 30 * 60 * 1000).toISOString() : null,
+                email
+            );
+            
+            console.warn('[OfflineDB] ❌ 비밀번호 불일치:', email, `(${failedCount}/5)`);
+            return null;
+        }
+        
+        // ✅ 로그인 성공 - 실패 횟수 초기화
+        const db = getDb();
+        const successStmt = db.prepare(`
+            UPDATE offline_users
+            SET 
+                failedLoginAttempts = 0,
+                lastFailedLoginAt = NULL,
+                lockedUntil = NULL,
+                lastOnlineLoginAt = ?,
+                lastSyncAt = ?,
+                updatedAt = ?
+            WHERE email = ?
+        `);
+        
+        successStmt.run(
+            new Date().toISOString(),
+            new Date().toISOString(),
+            new Date().toISOString(),
+            email
+        );
+        
+        console.log('[OfflineDB] ✅ 오프라인 로그인 성공:', email);
+        return getOfflineUser(email);
+    } catch (err) {
+        console.error('[OfflineDB] bcrypt 비교 에러:', err instanceof Error ? err.message : String(err));
+        return null;
+    }
 }
 
 /**
