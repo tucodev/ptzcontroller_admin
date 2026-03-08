@@ -171,7 +171,7 @@ export default function LoginPage() {
 
     // ── 라이센스 파일 업로드 + 검증 ─────────────────────────
     const handleLicenseUpload = async (
-        e: React.ChangeEvent<HTMLInputElement>,
+    e: React.ChangeEvent<HTMLInputElement>,
     ) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -180,24 +180,38 @@ export default function LoginPage() {
         try {
             const formData = new FormData();
             formData.append("license", file);
-            const res = await fetch("/api/license/verify", {
-                method: "POST",
-                body: formData,
+            
+            // P-48: 오프라인 모드일 때는 request-upload 사용
+            const apiEndpoint = isOffline 
+            ? "/api/license/request-upload"  // P-48 (오프라인)
+            : "/api/license/verify";          // 온라인
+            
+            console.log('[Login] Uploading license to:', apiEndpoint);
+            
+            const res = await fetch(apiEndpoint, {
+            method: "POST",
+            body: formData,
             });
             const data = await res.json();
+            
             if (res.ok && data.success) {
-                setLicenseInfo({ expiresAt: data.expiresAt });
-                setOfflineStep("licensed");
+            setLicenseInfo({ expiresAt: data.expiresAt });
+            setOfflineStep("licensed");
+            console.log('[Login] License upload successful');
             } else {
-                setLicenseError(data.error ?? "라이센스 검증에 실패했습니다");
-                setOfflineStep("invalid");
-            }
-        } catch {
-            setLicenseError("파일 업로드 중 오류가 발생했습니다");
+            const errorMsg = data.error ?? "라이센스 검증에 실패했습니다";
+            setLicenseError(errorMsg);
             setOfflineStep("invalid");
+            console.warn('[Login] License upload failed:', errorMsg);
+            }
+        } catch (err) {
+            const errorMsg = (err as Error).message || "파일 업로드 중 오류가 발생했습니다";
+            setLicenseError(errorMsg);
+            setOfflineStep("invalid");
+            console.error('[Login] Upload error:', err);
         } finally {
             setUploading(false);
-            e.target.value = ""; // input 초기화 (같은 파일 재시도 가능하도록)
+            e.target.value = ""; // input 초기화
         }
     };
 

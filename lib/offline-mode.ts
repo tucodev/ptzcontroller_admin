@@ -1,21 +1,14 @@
 /**
- * offline-mode.ts
- *
- * Standalone EXE 환경에서 인터넷 DB에 연결할 수 없을 때
- * 인증 없이 user 권한으로 앱을 사용할 수 있도록 한다.
- *
- * 동작 원리:
- *   1. DB 연결 테스트 (prisma.$queryRaw `SELECT 1`)
- *   2. 실패 시 오프라인 세션 객체를 반환 → role: 'user', admin 기능 비활성화
- *   3. 카메라 제어·설정은 로컬 JSON 파일 기반이므로 DB 없이도 정상 동작
- *
- * 오프라인 모드 제약:
- *   - 로그인/회원가입 불가 (DB 없음)
- *   - admin 기능 전체 비활성화
- *   - 카메라 제어(PTZ), 카메라/프리셋/설정 조회·수정은 정상 동작
+ * offline-mode.ts (P-47 완전 구현)
+ * 
+ * DB 연결 불가 시 오프라인 모드 활성화
+ * 라이선스 검증 포함 (P-46)
  */
 
 import { prisma } from './db';
+import { verifyLicense, getLicenseDir, createLicenseRequest, saveRequestFile } from './license';
+import path from 'path';
+import fs from 'fs';
 
 // ── 오프라인 세션 타입 ───────────────────────────────────────
 export interface OfflineSession {
@@ -25,32 +18,31 @@ export interface OfflineSession {
     email: string;
     role:  'user'; // 오프라인은 항상 user 고정
   };
-  offline: true;   // 오프라인 세션 식별 플래그
+  offline: true;
+  license?: {
+    valid: boolean;
+    expiresAt?: string;
+    reason?: string;
+  };
 }
 
 // ── DB 연결 상태 캐시 ────────────────────────────────────────
-// 프로세스가 살아있는 동안 캐시 (매 요청마다 DB 테스트하지 않음)
 let _dbAvailable: boolean | null = null;
 let _lastCheckTime = 0;
 const CACHE_TTL_MS = 30_000; // 30초마다 재확인
+const DB_CHECK_TIMEOUT_MS = 3_000;
 
 /**
  * DB 연결 가능 여부 확인
- * 결과는 30초간 캐시되므로 반복 호출에도 성능 영향 없음
+ * 결과는 30초간 캐시됨
  */
-/** DB 연결 확인 타임아웃 (ms). 이 시간 내 응답 없으면 오프라인으로 판단 */
-const DB_CHECK_TIMEOUT_MS = 3_000;
-
 export async function isDbAvailable(): Promise<boolean> {
   const now = Date.now();
-  // 캐시 유효 시간 내라면 캐시된 결과 반환
   if (_dbAvailable !== null && now - _lastCheckTime < CACHE_TTL_MS) {
     return _dbAvailable;
   }
 
   try {
-    // 타임아웃과 DB 쿼리 중 먼저 완료되는 쪽으로 결정
-    // → DB 연결이 끊겼을 때 수십 초씩 대기하는 문제 해결
     await Promise.race([
       prisma.$queryRaw`SELECT 1`,
       new Promise<never>((_, reject) =>
@@ -68,18 +60,96 @@ export async function isDbAvailable(): Promise<boolean> {
 }
 
 /**
- * DB 연결 캐시 강제 초기화 (재연결 시도 버튼에서 사용)
+ * DB 연결 캐시 강제 초기화
+ * (재연결 시도 버튼 등에서 사용)
  */
 export function resetDbCache(): void {
   _dbAvailable   = null;
   _lastCheckTime = 0;
+  console.log('[OfflineMode] DB cache reset');
 }
 
 /**
- * 오프라인 세션 객체 반환
- * API 라우트에서 getServerSession() 이 null 을 반환할 때 폴백으로 사용
+ * 라이선스 파일 검증 (P-46)
+ * 
+ * 반환:
+ *   { valid: true, expiresAt: "2027-03-07T..." }  – 라이선스 유효
+ *   { valid: false, reason: "Expired" }           – 라이선스 만료
+ *   { valid: false, reason: "Not found" }         – 라이선스 없음
  */
-export function createOfflineSession(): OfflineSession {
+async function verifyOfflineLicense(): Promise<{ valid: boolean; expiresAt?: string; reason?: string }> {
+  try {
+    const licenseDir = getLicenseDir();
+    const licenseFile = path.join(licenseDir, 'offline.ptzlic');
+    
+    // 라이선스 파일 존재 여부 확인
+    if (!fs.existsSync(licenseFile)) {
+      console.warn('[OfflineMode] License file not found. Creating license request...');
+      
+      // 요청 파일 생성
+      try {
+        const request = await createLicenseRequest();
+        await saveRequestFile(request);
+        console.log('[OfflineMode] License request saved. Please upload to license server.');
+        console.log('[OfflineMode] Request file location:', path.join(licenseDir, 'license.ptzreq'));
+      } catch (err) {
+        console.warn('[OfflineMode] Failed to create license request:', err);
+      }
+      
+      return { valid: false, reason: 'Not found' };
+    }
+    
+    // 라이선스 파일 검증
+    const licenseContent = fs.readFileSync(licenseFile, 'utf-8').trim();
+    const result = verifyLicense(licenseContent);
+    
+    if (!result.valid) {
+      console.warn('[OfflineMode] License validation failed:', result.reason);
+      return result;
+    }
+    
+    // 라이선스 만료 시간까지의 남은 시간 로깅
+    if (result.expiresAt) {
+      const expiresAt = new Date(result.expiresAt);
+      const daysLeft = Math.floor((expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      
+      if (daysLeft <= 0) {
+        console.warn('[OfflineMode] License has expired');
+        return { valid: false, reason: 'Expired' };
+      } else if (daysLeft <= 30) {
+        console.warn(`[OfflineMode] License expires in ${daysLeft} days`);
+      } else {
+        console.log(`[OfflineMode] License valid for ${daysLeft} more days`);
+      }
+    }
+    
+    return result;
+  } catch (err) {
+    console.error('[OfflineMode] License verification error:', err);
+    return { valid: false, reason: 'Verification error' };
+  }
+}
+
+/**
+ * 오프라인 세션 생성
+ * 라이선스 검증 포함 (필수)
+ */
+export async function createOfflineSession(): Promise<OfflineSession> {
+  // P-47: 라이선스 검증 (필수)
+  const licenseStatus = await verifyOfflineLicense();
+  
+  // 라이선스 검증 결과 로깅
+  if (!licenseStatus.valid) {
+    console.warn('[OfflineMode] ⚠️  Offline mode activated WITHOUT valid license');
+    console.warn('[OfflineMode] Reason:', licenseStatus.reason);
+    console.warn('[OfflineMode] Please upload a valid license file to enable offline mode');
+  } else {
+    console.log('[OfflineMode] ✅ Offline mode activated WITH valid license');
+    if (licenseStatus.expiresAt) {
+      console.log('[OfflineMode] License expires at:', licenseStatus.expiresAt);
+    }
+  }
+  
   return {
     user: {
       id:    'offline',
@@ -88,6 +158,7 @@ export function createOfflineSession(): OfflineSession {
       role:  'user',
     },
     offline: true,
+    license: licenseStatus,
   };
 }
 
