@@ -180,6 +180,112 @@ export default function LoginPage() {
         }
     };
 
+    // ── 로그인 / 회원가입 폼 제출 ────────────────────────
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        setLoading(true);
+        setError("");
+
+        try {
+            if (isLogin) {
+                // ───────────────────────────────────────────
+                // 로그인 모드
+                // ───────────────────────────────────────────
+                if (!email || !password) {
+                    setError("이메일과 비밀번호를 입력해주세요");
+                    setLoading(false);
+                    return;
+                }
+
+                console.log('[Login] 온라인 로그인 시도:', email);
+
+                // NextAuth 자격증명 제공자로 로그인
+                const result = await signIn("credentials", {
+                    email,
+                    password,
+                    redirect: false,
+                });
+
+                if (result?.error) {
+                    console.error('[Login] ❌ 로그인 실패:', result.error);
+                    setError(
+                        result.error === "CredentialsSignin"
+                            ? "이메일 또는 비밀번호가 올바르지 않습니다"
+                            : result.error
+                    );
+                    setLoading(false);
+                    return;
+                }
+
+                if (result?.ok) {
+                    console.log('[Login] ✅ 온라인 로그인 성공:', email);
+                    setError("");
+                    
+                    // 대시보드로 이동
+                    router.replace("/dashboard");
+                    return;
+                }
+            } else {
+                // ───────────────────────────────────────────
+                // 회원가입 모드
+                // ───────────────────────────────────────────
+                if (!email || !password || !name || !organization) {
+                    setError("모든 필드를 입력해주세요");
+                    setLoading(false);
+                    return;
+                }
+
+                if (password.length < 8) {
+                    setError("비밀번호는 8자 이상이어야 합니다");
+                    setLoading(false);
+                    return;
+                }
+
+                console.log('[Login] 회원가입 시도:', email);
+
+                const res = await fetch("/api/signup", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        email,
+                        password,
+                        name,
+                        organization,
+                    }),
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    setError(data.error || "회원가입 실패");
+                    setLoading(false);
+                    return;
+                }
+
+                console.log('[Login] ✅ 회원가입 성공:', email);
+                
+                // 회원가입 성공 → 로그인 폼으로 전환
+                setIsLogin(true);
+                setEmail("");
+                setPassword("");
+                setName("");
+                setOrganization("");
+                setError("");
+                alert("회원가입이 완료되었습니다. 로그인해주세요.");
+                setLoading(false);
+                return;
+            }
+        } catch (err) {
+            console.error('[Login] ❌ 오류:', err);
+            setError(
+                err instanceof Error
+                    ? err.message
+                    : "알 수 없는 오류가 발생했습니다"
+            );
+        } finally {
+            setLoading(false);
+        }
+    };    
     // ── 라이센스 파일 업로드 + 검증 ─────────────────────────
     // ✅ NEW: 라이센스 업로드 후 처리
     const handleLicenseUpload = async (
@@ -254,6 +360,7 @@ export default function LoginPage() {
         console.log('[Login] User info saved, entering offline mode');
         handleEnterOffline();
     };
+
 
     // ── 오프라인 단계별 컨텐츠 렌더링 ───────────────────────
     const renderOfflineContent = () => {
