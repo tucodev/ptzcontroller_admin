@@ -25,12 +25,14 @@ import { motion, AnimatePresence } from "framer-motion";
 
 // ── 오프라인 라이센스 UI 단계 ───────────────────────────────
 type OfflineStep =
-    | "idle" // 오프라인 배너만 표시
-    | "check" // 기존 라이센스 확인 중
-    | "licensed" // 유효한 라이센스 있음 → 바로 진행 가능
-    | "no_license" // 라이센스 없음 → 요청 파일 안내
-    | "upload" // 라이센스 파일 업로드 대기
-    | "invalid"; // 라이센스 검증 실패
+    | "idle"              // 오프라인 배너만 표시
+    | "check"             // 기존 라이센스 확인 중
+    | "licensed"          // 유효한 라이센스 있음 → 바로 진행 가능
+    | "no_license"        // 라이센스 없음 → 요청 파일 안내
+    | "upload"            // 라이센스 파일 업로드 대기
+    | "invalid"           // 라이센스 검증 실패
+    | "new_user_info"     // ✅ NEW: 신규 사용자 정보 입력
+    | "user_confirm";     // ✅ NEW: 사용자 승인 대기
 
 export default function LoginPage() {
     const router = useRouter();
@@ -55,6 +57,13 @@ export default function LoginPage() {
     const [uploading, setUploading] = useState(false);
     const [downloadingReq, setDownloadingReq] = useState(false);
 
+    // ✅ NEW: 신규 사용자 정보 입력 상태
+    const [newUserInfo, setNewUserInfo] = useState({
+        name: "",
+        organization: "",
+    });
+    const [userCreated, setUserCreated] = useState(false);
+    
     // 페이지 로드 시 DB 연결 상태 확인 (서버 측 타임아웃 3초 이내 응답)
     useEffect(() => {
         checkOfflineStatus();
@@ -140,8 +149,10 @@ export default function LoginPage() {
     };
 
     // ── 라이센스 통과 → 오프라인 모드 진입 ──────────────────
+    // ✅ NEW: 오프라인 모드 진입 (기존 함수 개선)
     const handleEnterOffline = () => {
         sessionStorage.setItem("offlineMode", "true");
+        console.log('[Login] Entering offline mode');
         router.replace("/dashboard");
     };
 
@@ -170,8 +181,9 @@ export default function LoginPage() {
     };
 
     // ── 라이센스 파일 업로드 + 검증 ─────────────────────────
+    // ✅ NEW: 라이센스 업로드 후 처리
     const handleLicenseUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
+        e: React.ChangeEvent<HTMLInputElement>,
     ) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -181,28 +193,36 @@ export default function LoginPage() {
             const formData = new FormData();
             formData.append("license", file);
             
-            // P-48: 오프라인 모드일 때는 request-upload 사용
             const apiEndpoint = isOffline 
-            ? "/api/license/request-upload"  // P-48 (오프라인)
-            : "/api/license/verify";          // 온라인
+                ? "/api/license/request-upload"
+                : "/api/license/verify";
             
             console.log('[Login] Uploading license to:', apiEndpoint);
             
             const res = await fetch(apiEndpoint, {
-            method: "POST",
-            body: formData,
+                method: "POST",
+                body: formData,
             });
             const data = await res.json();
             
             if (res.ok && data.success) {
-            setLicenseInfo({ expiresAt: data.expiresAt });
-            setOfflineStep("licensed");
-            console.log('[Login] License upload successful');
+                setLicenseInfo({ expiresAt: data.expiresAt });
+                
+                // ✅ NEW: userCreated 필드 확인
+                if (data.userCreated) {
+                    console.log('[Login] New user created, showing info form');
+                    setUserCreated(true);
+                    setOfflineStep("new_user_info");  // ← 신규 사용자 정보 입력 단계
+                } else {
+                    console.log('[Login] Existing user, entering offline mode');
+                    setUserCreated(false);
+                    setOfflineStep("licensed");  // ← 바로 진입
+                }
             } else {
-            const errorMsg = data.error ?? "라이센스 검증에 실패했습니다";
-            setLicenseError(errorMsg);
-            setOfflineStep("invalid");
-            console.warn('[Login] License upload failed:', errorMsg);
+                const errorMsg = data.error ?? "라이센스 검증에 실패했습니다";
+                setLicenseError(errorMsg);
+                setOfflineStep("invalid");
+                console.warn('[Login] License upload failed:', errorMsg);
             }
         } catch (err) {
             const errorMsg = (err as Error).message || "파일 업로드 중 오류가 발생했습니다";
@@ -211,42 +231,28 @@ export default function LoginPage() {
             console.error('[Login] Upload error:', err);
         } finally {
             setUploading(false);
-            e.target.value = ""; // input 초기화
+            e.target.value = "";
         }
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setError("");
-        setLoading(true);
-        try {
-            if (!isLogin) {
-                // Sign up
-                const res = await fetch("/api/signup", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ email, password, name, organization }),
-                });
-                const data = await res.json();
-                if (!res?.ok) {
-                    setError(data?.error ?? "Signup failed");
-                    setLoading(false);
-                    return;
-                }
-            }
-            const result = await signIn("credentials", {
-                email,
-                password,
-                redirect: false,
-            });
-            if (result?.error) {
-                setError("Invalid credentials");
-                setLoading(false);
-            } else router.replace("/dashboard");
-        } catch {
-            setError("An error occurred");
-            setLoading(false);
+    // ✅ NEW: 사용자 정보 입력 후 오프라인 모드 진입
+    const handleEnterOfflineWithInfo = () => {
+        // 사용자 정보 저장 (sessionStorage에 임시 저장)
+        if (!newUserInfo.name.trim() || !newUserInfo.organization.trim()) {
+            setLicenseError("사용자명과 회사/소속을 모두 입력하세요");
+            return;
         }
+        
+        // 사용자 정보 저장 (sessionStorage에 임시 저장)
+        sessionStorage.setItem(
+            'offlineUserInfo',
+            JSON.stringify({
+                name: newUserInfo.name.trim(),
+                organization: newUserInfo.organization.trim(),
+            })
+        );
+        console.log('[Login] User info saved, entering offline mode');
+        handleEnterOffline();
     };
 
     // ── 오프라인 단계별 컨텐츠 렌더링 ───────────────────────
@@ -403,6 +409,92 @@ export default function LoginPage() {
             );
         }
 
+        // ✅ NEW: [new_user_info] 신규 사용자 정보 입력
+        if (offlineStep === "new_user_info") {
+            return (
+                <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-green-500">
+                        <CheckCircle className="w-4 h-4 shrink-0" />
+                        <span className="text-sm font-medium">
+                            라이센스 검증 완료
+                        </span>
+                    </div>
+                    
+                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                        <p className="text-xs text-blue-700 font-medium">
+                            ℹ️ 오프라인 모드로 사용할 사용자 정보를 입력하세요
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-medium mb-1">
+                            사용자명
+                        </label>
+                        <input
+                            type="text"
+                            value={newUserInfo.name}
+                            onChange={(e) =>
+                                setNewUserInfo({
+                                    ...newUserInfo,
+                                    name: e.target.value,
+                                })
+                            }
+                            placeholder="예: 홍길동"
+                            className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                            autoFocus
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-medium mb-1">
+                            회사/소속
+                        </label>
+                        <input
+                            type="text"
+                            value={newUserInfo.organization}
+                            onChange={(e) =>
+                                setNewUserInfo({
+                                    ...newUserInfo,
+                                    organization: e.target.value,
+                                })
+                            }
+                            placeholder="예: (주)예시회사"
+                            className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                        />
+                    </div>
+
+                    {licenseError && (
+                        <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 p-2 rounded-lg">
+                            <XCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                            <span>{licenseError}</span>
+                        </div>
+                    )}
+
+                    <button
+                        onClick={handleEnterOfflineWithInfo}
+                        className="w-full py-2.5 bg-amber-500 hover:bg-amber-500/90 text-white text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                        <WifiOff className="w-4 h-4" />
+                        오프라인 모드로 진입
+                    </button>
+
+                    <button
+                        onClick={() => {
+                            setOfflineStep("upload");
+                            setLicenseError("");
+                            setNewUserInfo({ name: "", organization: "" });
+                        }}
+                        className="w-full py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                        ← 다른 라이센스 파일 업로드
+                    </button>
+                </div>
+            );
+        }
+        
+        // ✅ NEW: [user_confirm] 사용자 승인 대기 (선택사항)
+        // 현재는 new_user_info에서 바로 진입하므로 생략
+        // 필요시 추가 가능
         // [idle] 초기 오프라인 배너
         return (
             <div className="space-y-3">
