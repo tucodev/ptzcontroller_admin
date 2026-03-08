@@ -192,8 +192,11 @@ export function getAllOfflineUsers(): OfflineUserRecord[] {
 /**
  * 사용자 저장/업데이트
  */
+/**
+ * 사용자 저장/업데이트
+ */
 export function saveOfflineUser(
-  user: Omit<OfflineUserRecord, 'createdAt' | 'updatedAt'> & { 
+  user: Omit<OfflineUserRecord, 'createdAt' | 'updatedAt' | 'id'> & { 
     id?: string;
     createdAt?: string;
   }
@@ -203,7 +206,7 @@ export function saveOfflineUser(
   const id = user.id || generateId();
   const now = new Date().toISOString();
   const existing = getOfflineUser(user.email);
-  
+    
   if (existing) {
     // 업데이트
     const stmt = db.prepare(`

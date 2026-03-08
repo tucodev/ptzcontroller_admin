@@ -39,20 +39,39 @@ import { execSync, spawnSync } from 'child_process';
 const MASTER_SECRET = process.env.LICENSE_SECRET ?? 'TYCHE-PTZ-LICENSE-SECRET-2024';
 const PRODUCT_ID = 'PTZ-OFFLINE';
 
+// ── 라이선스 디렉토리 경로 ────────────────────────────────────────────
+export function getLicenseDir(): string {
+  if (process.platform === 'win32') {
+    const programData = process.env.PROGRAMDATA || process.env.ALLUSERSPROFILE || 'C:\\ProgramData';
+    return path.join(programData, 'PTZController');
+  } else if (process.platform === 'darwin') {
+    return '/Library/Application Support/PTZController';
+  } else {
+    return path.join(process.env.HOME || '/etc', '.config', 'PTZController');
+  }
+}
+
 // ── 안전한 명령어 실행 ────────────────────────────────────────────────
 function safeSpawn(cmd: string, args: string[], timeout: number = 3000): string | null {
   try {
+    // ✅ encoding: 'utf8' 필수 - stdout이 string이 되도록 지정
     const result = spawnSync(cmd, args, {
       timeout,
-      encoding: 'utf8',
+      encoding: 'utf8' as const,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
+    
+    // ✅ stdout은 이제 string | Buffer 대신 string
     if (result.status === 0 && result.stdout) {
-      return result.stdout.trim();
+      const output = result.stdout;
+      if (typeof output === 'string') {
+        return output.trim();
+      }
     }
     return null;
   } catch (e) {
+    console.warn('[license] spawnSync failed:', (e as Error).message);
     return null;
   }
 }
@@ -64,6 +83,7 @@ function safeReadFile(filePath: string): string | null {
     }
     return null;
   } catch (e) {
+    console.warn('[license] readFile failed:', (e as Error).message);
     return null;
   }
 }
@@ -75,27 +95,41 @@ function getOsId(): string {
 
   try {
     if (platform === 'win32') {
-      const out = spawnSync('reg', [
+      // ✅ encoding: 'utf8' 지정하여 stdout이 string이 되도록
+      const result = spawnSync('reg', [
         'query',
         'HKLM\\SOFTWARE\\Microsoft\\Cryptography',
         '/v',
         'MachineGuid',
-      ]).stdout as string;
-      if (out) {
-        const match = out.match(/MachineGuid\s+REG_SZ\s+(.+)/);
-        if (match) osId = match[1].trim();
+      ], {
+        timeout: 3000,
+        encoding: 'utf8' as const,
+        windowsHide: true,
+      });
+
+      if (result.status === 0 && result.stdout) {
+        const out = result.stdout;
+        if (typeof out === 'string') {
+          const match = out.match(/MachineGuid\s+REG_SZ\s+(.+)/);
+          if (match) {
+            osId = match[1].trim();
+          }
+        }
       }
     } else if (platform === 'darwin') {
       const out = safeSpawn('ioreg', ['-rd1', '-c', 'IOPlatformExpertDevice']);
       if (out) {
         const match = out.match(/"IOPlatformUUID"\s*=\s*"([^"]+)"/);
-        if (match) osId = match[1];
+        if (match) {
+          osId = match[1];
+        }
       }
     } else {
+      // Linux
       osId = safeReadFile('/etc/machine-id') || safeReadFile('/var/lib/dbus/machine-id') || '';
     }
   } catch (e) {
-    console.warn('[license] OS ID 추출 실패:', e);
+    console.warn('[license] OS ID 추출 실패:', (e as Error).message);
   }
 
   return osId || `${platform}-${os.arch()}-${os.totalmem()}`;
@@ -110,23 +144,29 @@ function makeHwId(osId: string, hwKey: string): string {
     .toUpperCase();
 }
 
-// ── Windows NIC 수집 (버전별 전략) ──────────────────────────────────
+// ── Windows 버전 감지 ────────────────────────────────────────────────
 function getWindowsOsVersion(): 'win7' | 'win8+' {
   try {
-    // Windows 버전 감지: ver 명령 또는 레지스트리
-    const out = spawnSync('cmd', ['/c', 'ver']).stdout as string;
-    if (out && out.includes('Windows 7')) return 'win7';
-    // Windows 8, 10, 11 등
+    // ✅ encoding: 'utf8' 지정
+    const result = spawnSync('cmd', ['/c', 'ver'], {
+      timeout: 3000,
+      encoding: 'utf8' as const,
+      windowsHide: true,
+    });
+
+    if (result.status === 0 && result.stdout) {
+      const out = result.stdout;
+      if (typeof out === 'string' && out.includes('Windows 7')) {
+        return 'win7';
+      }
+    }
     return 'win8+';
   } catch {
-    // 폴백: PowerShell이 작동하면 Win8+, 아니면 Win7
     return 'win8+';
   }
 }
 
-/**
- * Windows 8+ : PowerShell로 모든 어댑터 (비활성 포함) 수집
- */
+// ── Windows 8+ : PowerShell (비활성 NIC 포함) ────────────────────────
 function getWindowsMacsModern(): string[] {
   const macs: string[] = [];
 
@@ -136,7 +176,7 @@ function getWindowsMacsModern(): string[] {
     'Get-NetAdapter -Physical | Select-Object -ExpandProperty MacAddress',
   ], 5000);
 
-  if (psOut) {
+  if (psOut && typeof psOut === 'string') {
     for (const line of psOut.split(/\r?\n/)) {
       const mac = line.trim().toLowerCase();
       if (/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac) && mac !== '00:00:00:00:00:00') {
@@ -148,20 +188,19 @@ function getWindowsMacsModern(): string[] {
   return macs;
 }
 
-/**
- * Windows 7 : getmac로 활성 어댑터만 수집
- * (비활성은 불가능하지만, HDD 시리얼로 보완)
- */
+// ── Windows 7 : getmac (활성만) ─────────────────────────────────────
 function getWindowsMacsLegacy(): string[] {
   const macs: string[] = [];
 
   const getmacOut = safeSpawn('getmac', []);
-  if (getmacOut) {
+  if (getmacOut && typeof getmacOut === 'string') {
     const matches = getmacOut.match(/([0-9A-Fa-f]{2}-){5}[0-9A-Fa-f]{2}/g);
     if (matches) {
       for (const match of matches) {
         const mac = match.replace(/-/g, ':').toLowerCase();
-        if (mac !== '00:00:00:00:00:00') macs.push(mac);
+        if (mac !== '00:00:00:00:00:00') {
+          macs.push(mac);
+        }
       }
     }
   }
@@ -173,30 +212,34 @@ function getWindowsMacs(): string[] {
   const version = getWindowsOsVersion();
 
   if (version === 'win8+') {
-    console.log('[license] Windows 8+ detected – using PowerShell (비활성 어댑터 포함)');
+    console.log('[license] Windows 8+ 감지 – PowerShell 사용 (비활성 어댑터 포함)');
     const macs = getWindowsMacsModern();
-    if (macs.length > 0) return macs;
-    
-    // PowerShell 실패 시 폴백
+    if (macs.length > 0) {
+      return macs;
+    }
+
     console.warn('[license] PowerShell 실패 – getmac 폴백');
     return getWindowsMacsLegacy();
   } else {
-    console.log('[license] Windows 7 detected – using getmac (활성만)');
+    console.log('[license] Windows 7 감지 – getmac 사용 (활성만)');
     return getWindowsMacsLegacy();
   }
 }
 
-// ── macOS NIC 수집 ──────────────────────────────────────────────────
+// ── macOS : ifconfig ────────────────────────────────────────────────
 function getMacOsMacs(): string[] {
   const macs: string[] = [];
 
   const out = safeSpawn('ifconfig', []);
-  if (out) {
+  if (out && typeof out === 'string') {
     const matches = out.match(/ether\s+([0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2})/gi);
     if (matches) {
       for (const match of matches) {
-        const mac = match.split(' ')[1].toLowerCase();
-        if (mac !== '00:00:00:00:00:00') macs.push(mac);
+        const parts = match.split(/\s+/);
+        const mac = parts[1]?.toLowerCase();
+        if (mac && mac !== '00:00:00:00:00:00') {
+          macs.push(mac);
+        }
       }
     }
   }
@@ -204,37 +247,40 @@ function getMacOsMacs(): string[] {
   return [...new Set(macs)];
 }
 
-// ── Linux NIC 수집 ──────────────────────────────────────────────────
+// ── Linux : /sys/class/net ─────────────────────────────────────────
 function getLinuxMacs(): string[] {
   const macs: string[] = [];
 
   try {
     const netDir = '/sys/class/net';
-    if (!fs.existsSync(netDir)) return macs;
+    if (!fs.existsSync(netDir)) {
+      return macs;
+    }
 
     const ifaces = fs.readdirSync(netDir);
     for (const iface of ifaces) {
-      if (iface === 'lo' || iface.startsWith('vnet') || iface.startsWith('docker')) continue;
+      if (iface === 'lo' || iface.startsWith('vnet') || iface.startsWith('docker')) {
+        continue;
+      }
 
       const addressPath = path.join(netDir, iface, 'address');
       const mac = safeReadFile(addressPath);
 
-      if (mac && mac !== '00:00:00:00:00:00' && !mac.startsWith('02:')) {
+      if (mac && typeof mac === 'string' && mac !== '00:00:00:00:00:00' && !mac.startsWith('02:')) {
         macs.push(mac.toLowerCase());
       }
     }
   } catch (e) {
-    console.warn('[license] Linux MAC 수집 실패:', e);
+    console.warn('[license] Linux MAC 수집 실패:', (e as Error).message);
   }
 
   return [...new Set(macs)];
 }
 
-// ── HDD 시리얼 수집 (Windows 7용 보완) ──────────────────────────────
+// ── Windows HDD 시리얼 (Windows 7 보완) ────────────────────────────
 function getWindowsHddSerials(): string[] {
   const serials: string[] = [];
 
-  // wmic (Windows 7-10)
   try {
     const out = safeSpawn('wmic', [
       'logicaldisk',
@@ -242,7 +288,8 @@ function getWindowsHddSerials(): string[] {
       'volumeserialnumber',
       '/format:table',
     ]);
-    if (out) {
+    
+    if (out && typeof out === 'string') {
       const matches = out.match(/[0-9A-Fa-f]{8}/g);
       if (matches) {
         for (const match of matches) {
@@ -251,7 +298,7 @@ function getWindowsHddSerials(): string[] {
       }
     }
   } catch (e) {
-    console.warn('[license] HDD 시리얼 수집 실패:', e);
+    console.warn('[license] HDD 시리얼 수집 실패:', (e as Error).message);
   }
 
   return [...new Set(serials)];
@@ -300,7 +347,7 @@ export function getAllMachineIds(): string[] {
   return ids;
 }
 
-// ── 라이선스 요청/발급/검증 (기존 코드) ────────────────────────────
+// ── 타입 정의 ────────────────────────────────────────────────────────
 export interface LicensePayload {
   machineId: string;
   machineIds: string[];
@@ -329,15 +376,9 @@ export interface VerifyResult {
   matchedIds?: string[];
 }
 
-export const LICENSE_FILE_PATH = path.join(
-  process.env.PTZ_DATA_DIR ? path.join(process.env.PTZ_DATA_DIR, 'data') :
-  process.platform === 'win32' ? path.join(process.env.PROGRAMDATA || 'C:\\ProgramData', 'PTZController') :
-  process.platform === 'darwin' ? '/Library/Application Support/PTZController' :
-  path.join(process.env.HOME || '/etc', '.config', 'PTZController'),
-  'offline.ptzlic'
-);
-
-export const REQUEST_FILE_PATH = path.dirname(LICENSE_FILE_PATH) + '/license.ptzreq';
+// ── 라이선스 파일 경로 ────────────────────────────────────────────────
+export const LICENSE_FILE_PATH = path.join(getLicenseDir(), 'offline.ptzlic');
+export const REQUEST_FILE_PATH = path.join(getLicenseDir(), 'license.ptzreq');
 
 // ── 라이선스 요청 생성 ────────────────────────────────────────────────
 export function createLicenseRequest(): RequestPayload {
@@ -354,11 +395,19 @@ export function createLicenseRequest(): RequestPayload {
   return { ...payload, sig };
 }
 
-export function saveRequestFile(): string {
-  const request = createLicenseRequest();
-  const content = Buffer.from(JSON.stringify(request, null, 2)).toString('base64');
+/**
+ * 라이선스 요청 저장
+ * @param request - 선택적: RequestPayload. 제공되지 않으면 새로 생성
+ */
+export function saveRequestFile(request?: RequestPayload): string {
+  // request가 제공되지 않으면 새로 생성
+  const req = request || createLicenseRequest();
+  
+  const content = Buffer.from(JSON.stringify(req, null, 2)).toString('base64');
   fs.mkdirSync(path.dirname(REQUEST_FILE_PATH), { recursive: true });
   fs.writeFileSync(REQUEST_FILE_PATH, content, 'utf8');
+  
+  console.log('[license] License request saved at:', REQUEST_FILE_PATH);
   return REQUEST_FILE_PATH;
 }
 
@@ -428,7 +477,8 @@ export function verifyLicense(licenseB64: string): VerifyResult {
       machineId: matchedIds[0],
       matchedIds,
     };
-  } catch {
+  } catch (e) {
+    console.error('[license] verifyLicense error:', (e as Error).message);
     return { valid: false, reason: '라이선스 파일을 읽을 수 없습니다' };
   }
 }
@@ -440,7 +490,8 @@ export function verifyLicenseFile(): VerifyResult {
   try {
     const content = fs.readFileSync(LICENSE_FILE_PATH, 'utf8').trim();
     return verifyLicense(content);
-  } catch {
+  } catch (e) {
+    console.error('[license] verifyLicenseFile error:', (e as Error).message);
     return { valid: false, reason: '라이선스 파일을 읽을 수 없습니다' };
   }
 }

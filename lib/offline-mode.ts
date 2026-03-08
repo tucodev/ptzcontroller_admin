@@ -88,14 +88,15 @@ async function verifyOfflineLicense(): Promise<{ valid: boolean; expiresAt?: str
       
       // 요청 파일 생성
       try {
-        const request = await createLicenseRequest();
-        await saveRequestFile(request);
+        const request = createLicenseRequest();
+        saveRequestFile(request);  // ← 인자 제거 또는
+        // 또는
+        saveRequestFile();  // ← 이렇게 호출
         console.log('[OfflineMode] License request saved. Please upload to license server.');
         console.log('[OfflineMode] Request file location:', path.join(licenseDir, 'license.ptzreq'));
       } catch (err) {
         console.warn('[OfflineMode] Failed to create license request:', err);
-      }
-      
+      }      
       return { valid: false, reason: 'Not found' };
     }
     
