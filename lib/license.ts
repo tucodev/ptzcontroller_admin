@@ -115,7 +115,7 @@ function getWindowsOsVersion(): 'win7' | 'win8+' {
   try {
     // Windows 버전 감지: ver 명령 또는 레지스트리
     const out = spawnSync('cmd', ['/c', 'ver']).stdout as string;
-    if (out.includes('Windows 7')) return 'win7';
+    if (out && out.includes('Windows 7')) return 'win7';
     // Windows 8, 10, 11 등
     return 'win8+';
   } catch {
@@ -339,6 +339,7 @@ export const LICENSE_FILE_PATH = path.join(
 
 export const REQUEST_FILE_PATH = path.dirname(LICENSE_FILE_PATH) + '/license.ptzreq';
 
+// ── 라이선스 요청 생성 ────────────────────────────────────────────────
 export function createLicenseRequest(): RequestPayload {
   const machineIds = getAllMachineIds();
   const machineId = machineIds[0] ?? 'UNKNOWN';
@@ -361,6 +362,7 @@ export function saveRequestFile(): string {
   return REQUEST_FILE_PATH;
 }
 
+// ── 라이선스 발급 (제공자용) ────────────────────────────────────────────
 export function issueLicense(
   machineId: string,
   machineIds: string[],
@@ -382,12 +384,14 @@ export function issueLicense(
   return Buffer.from(JSON.stringify(licenseFile)).toString('base64');
 }
 
+// ── 라이선스 검증 (핵심) ────────────────────────────────────────────────
 export function verifyLicense(licenseB64: string): VerifyResult {
   try {
     const raw = Buffer.from(licenseB64, 'base64').toString('utf8');
     const lic = JSON.parse(raw) as LicenseFile;
     const { sig, ...payload } = lic;
 
+    // 1. HMAC 서명 검증
     const expected = crypto
       .createHmac('sha256', MASTER_SECRET)
       .update(JSON.stringify(payload))
@@ -396,10 +400,12 @@ export function verifyLicense(licenseB64: string): VerifyResult {
       return { valid: false, reason: '라이선스 서명이 올바르지 않습니다' };
     }
 
+    // 2. Product 확인
     if (payload.product !== PRODUCT_ID) {
       return { valid: false, reason: '라이선스 제품이 일치하지 않습니다' };
     }
 
+    // 3. MachineID 검증 (배열 매칭)
     const currentIds = getAllMachineIds();
     const licenseIds = payload.machineIds?.length ? payload.machineIds : [payload.machineId];
     const matchedIds = currentIds.filter((cur) => licenseIds.includes(cur));
@@ -411,6 +417,7 @@ export function verifyLicense(licenseB64: string): VerifyResult {
       };
     }
 
+    // 4. 만료일 확인
     if (new Date(payload.expiresAt) < new Date()) {
       return { valid: false, reason: `라이선스가 만료됨 (${payload.expiresAt.slice(0, 10)})` };
     }
