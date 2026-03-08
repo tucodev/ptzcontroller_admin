@@ -1,7 +1,4 @@
 {
-  "/login/page": "app/login/page.js",
-  "/api/license/request/route": "app/api/license/request/route.js",
   "/dashboard/page": "app/dashboard/page.js",
-  "/api/license/request-upload/route": "app/api/license/request-upload/route.js",
-  "/api/license/verify/route": "app/api/license/verify/route.js"
+  "/login/page": "app/login/page.js"
 }
