@@ -4,13 +4,12 @@ import { PrismaAdapter } from '@next-auth/prisma-adapter';
 import { prisma } from './db';
 import bcrypt from 'bcryptjs';
 import {
-  getOfflineUser,
   saveOfflineUser,
   verifyOfflinePassword,
   initOfflineDb,
   updateOfflineModeStatus,
 } from './offline-db';
-import { verifyOfflineLicense } from './offline-mode'; // ✅ 추가
+import { verifyOfflineLicense } from './offline-mode';
 
 // 앱 시작 시 오프라인 DB 초기화
 try {
@@ -19,6 +18,9 @@ try {
 } catch (err) {
   console.warn('[Auth] Offline DB initialization failed (non-critical):', err);
 }
+
+// ✅ Desktop 모드 감지
+const IS_DESKTOP_MODE = process.env.PTZ_DESKTOP_MODE === 'true';
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
@@ -37,8 +39,11 @@ export const authOptions: NextAuthOptions = {
 
         const DB_AUTH_TIMEOUT_MS = 3_000;
         
+        // ==========================================
+        // 1단계: 온라인 인증 시도 (모두 동일)
+        // ==========================================
         try {
-          console.log('[Auth] 온라인 로그인 시도:', credentials.email);
+          console.log(`[Auth] 온라인 로그인 시도 (${IS_DESKTOP_MODE ? 'Desktop' : 'Admin'})`, credentials.email);
           const user = await Promise.race([
             prisma.user.findUnique({ 
               where: { email: credentials.email },
@@ -59,25 +64,24 @@ export const authOptions: NextAuthOptions = {
           if (user && user.password) {
             const isValid = await bcrypt.compare(credentials.password, user.password);
             if (isValid) {
-              console.log('[Auth] ✅ 온라인 로그인 성공:', credentials.email);
+              console.log(`[Auth] ✅ 온라인 로그인 성공 (${IS_DESKTOP_MODE ? 'Desktop' : 'Admin'}):`, credentials.email);
               
-              // ✅ 반드시 오프라인 DB에 저장 (중요!)
+              // 오프라인 DB에 동기화
               try {
-                const savedUser = await saveOfflineUser({
+                await saveOfflineUser({
                   email: user.email,
                   name: user.name || 'User',
                   organization: user.organization || undefined,
-                  passwordHash: user.password,  // 온라인 DB의 bcrypt 해시
+                  passwordHash: user.password,
                   role: (user.role as 'user' | 'admin') || 'user',
                   lastOnlineLoginAt: new Date().toISOString(),
                   lastSyncAt: new Date().toISOString(),
                   platform: process.platform,
                   appVersion: process.env.npm_package_version,
                 });
-                console.log('[Auth] ✅ 오프라인 DB 저장 완료:', savedUser.email);
+                console.log('[Auth] ✅ 오프라인 DB 동기화:', credentials.email);
               } catch (err) {
-                console.error('[Auth] ❌ 오프라인 DB 저장 실패:', err);
-                // 온라인 로그인은 성공했으므로 계속 진행
+                console.warn('[Auth] ⚠️  오프라인 DB 동기화 실패:', err);
               }
               
               return {
@@ -89,75 +93,17 @@ export const authOptions: NextAuthOptions = {
             }
           }
         } catch (error) {
-          console.error('[Auth] 온라인 DB 에러:', error instanceof Error ? error.message : String(error));
+          console.log(`[Auth] 온라인 DB 연결 불가 (${IS_DESKTOP_MODE ? 'Desktop' : 'Admin'}):`, error instanceof Error ? error.message : String(error));
         }
 
-        // DB 오프라인 또는 온라인 로그인 실패 → 오프라인 저장소 + 라이선스 검증
-        console.log('[Auth] 오프라인 로그인 시도 중...');
-        try {
-          // ✅ 1단계: 라이선스 검증 (필수!)
-          const licenseStatus = await verifyOfflineLicense();
-          if (!licenseStatus.valid) {
-            console.warn('[Auth] ❌ 오프라인 로그인 거부: 유효한 라이선스 없음');
-            console.warn('[Auth] Reason:', licenseStatus.reason);
-            return null; // ← 라이선스 없으면 로그인 불허
-          }
-          console.log('[Auth] ✅ 라이선스 검증 성공:', licenseStatus.expiresAt);
-
-          // ✅ 2단계: 라이선스 확인 후 비밀번호 검증
-          const offlineUser = await verifyOfflinePassword(
-            credentials.email,
-            credentials.password,
-            bcrypt
-          );
-          
-          if (offlineUser) {
-            console.log('[Auth] ✅ 오프라인 로그인 성공 (라이선스 있음):', credentials.email);
-            
-            // 오프라인 모드 상태 업데이트
-            updateOfflineModeStatus(offlineUser.email, true);
-            
-            return {
-              id: offlineUser.id,
-              email: offlineUser.email,
-              name: offlineUser.name,
-              role: offlineUser.role,
-            };
-          } else {
-            console.warn('[Auth] ❌ 오프라인 로그인 실패: 비밀번호 불일치');
-          }
-        } catch (err) {
-          console.error('[Auth] 오프라인 인증 에러:', err instanceof Error ? err.message : String(err));
-        }
-
-        console.warn('[Auth] ❌ 로그인 실패 (온라인/오프라인 모두):', credentials.email);
-        return null;
-      },
-    }),
-  ],
-
-  session: {
-    strategy: 'jwt',
-    maxAge: 24 * 60 * 60, // 24 hours
-  },
-  callbacks: {
-    async jwt({ token, user }) {
-      if (user) {
-        token.role = (user as { role?: string })?.role ?? 'user';
-        token.id = user?.id;
-      }
-      return token;
-    },
-    async session({ session, token }) {
-      if (session?.user) {
-        (session.user as { role?: string }).role = token?.role as string;
-        (session.user as { id?: string }).id = token?.id as string;
-      }
-      return session;
-    },
-  },
-  pages: {
-    signIn: '/login',
-  },
-  secret: process.env.NEXTAUTH_SECRET,
-};
+        // ==========================================
+        // 2단계: 오프라인 폴백 (Desktop만)
+        // ==========================================
+        if (IS_DESKTOP_MODE) {
+          console.log('[Auth] Desktop 오프라인 폴백 시도:', credentials.email);
+          try {
+            // ✅ Desktop: 라이선스 검증 필수
+            const licenseStatus = await verifyOfflineLicense();
+            if (!licenseStatus.valid) {
+              console.warn('[Auth] ❌ Desktop 오프라인: 라이선스 없음 또<span class="cursor">█</span>
+                
