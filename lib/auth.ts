@@ -10,6 +10,7 @@ import {
   initOfflineDb,
   updateOfflineModeStatus,
 } from './offline-db';
+import { verifyOfflineLicense } from './offline-mode'; // ✅ 추가
 
 // 앱 시작 시 오프라인 DB 초기화
 try {
@@ -91,9 +92,19 @@ export const authOptions: NextAuthOptions = {
           console.error('[Auth] 온라인 DB 에러:', error instanceof Error ? error.message : String(error));
         }
 
-        // DB 오프라인 또는 온라인 로그인 실패 → 오프라인 저장소 확인
+        // DB 오프라인 또는 온라인 로그인 실패 → 오프라인 저장소 + 라이선스 검증
         console.log('[Auth] 오프라인 로그인 시도 중...');
         try {
+          // ✅ 1단계: 라이선스 검증 (필수!)
+          const licenseStatus = await verifyOfflineLicense();
+          if (!licenseStatus.valid) {
+            console.warn('[Auth] ❌ 오프라인 로그인 거부: 유효한 라이선스 없음');
+            console.warn('[Auth] Reason:', licenseStatus.reason);
+            return null; // ← 라이선스 없으면 로그인 불허
+          }
+          console.log('[Auth] ✅ 라이선스 검증 성공:', licenseStatus.expiresAt);
+
+          // ✅ 2단계: 라이선스 확인 후 비밀번호 검증
           const offlineUser = await verifyOfflinePassword(
             credentials.email,
             credentials.password,
@@ -101,7 +112,7 @@ export const authOptions: NextAuthOptions = {
           );
           
           if (offlineUser) {
-            console.log('[Auth] ✅ 오프라인 로그인 성공:', credentials.email);
+            console.log('[Auth] ✅ 오프라인 로그인 성공 (라이선스 있음):', credentials.email);
             
             // 오프라인 모드 상태 업데이트
             updateOfflineModeStatus(offlineUser.email, true);
@@ -113,7 +124,7 @@ export const authOptions: NextAuthOptions = {
               role: offlineUser.role,
             };
           } else {
-            console.warn('[Auth] ❌ 오프라인 로그인 실패:', credentials.email);
+            console.warn('[Auth] ❌ 오프라인 로그인 실패: 비밀번호 불일치');
           }
         } catch (err) {
           console.error('[Auth] 오프라인 인증 에러:', err instanceof Error ? err.message : String(err));
