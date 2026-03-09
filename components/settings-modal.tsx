@@ -300,9 +300,16 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
           </button>
         </div>
         <p className="text-xs text-muted-foreground text-center">30초마다 자동으로 확인합니다</p>
+        
+        {/* ✅ 추가: 새 요청 버튼 */}
+        <button onClick={handleRequest}
+          className="w-full py-2 bg-blue-600 hover:bg-blue-600/90 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
+          <Send className="w-4 h-4" />
+          새로 요청하기
+        </button>
       </div>
     );
-
+    
     if (status === 'rejected') return (
       <div className="space-y-2">
         <div className="flex items-start gap-3 p-3 bg-destructive/10 border border-destructive/30 rounded-xl">

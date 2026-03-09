@@ -128,30 +128,23 @@ export default function LoginPage() {
         setOfflineStep("check");
         setLicenseError("");
         try {
-            // ✅ Desktop: 라이선스 검증 필수
-            if (typeof window !== 'undefined' && window.__TAURI__) {
-                // Desktop 환경 감지
-                const res = await fetch("/api/license/verify");
-                const data = await res.json();
-                if (data.valid) {
-                    setLicenseInfo({ expiresAt: data.expiresAt });
-                    setOfflineStep("licensed");
-                } else if (data.reason === "NOT_FOUND") {
-                    setOfflineStep("no_license");
-                } else {
-                    setLicenseError(data.reason ?? "라이선스가 유효하지 않습니다");
-                    setOfflineStep("invalid");
-                }
-            } else {
-                // Admin 웹 버전: 라이선스 검증 없음, 요청만 제공
+            const res = await fetch("/api/license/verify");
+            const data = await res.json();
+            if (data.valid) {
+                setLicenseInfo({ expiresAt: data.expiresAt });
+                setOfflineStep("licensed");
+            } else if (data.reason === "NOT_FOUND") {
                 setOfflineStep("no_license");
+            } else {
+                setLicenseError(data.reason ?? "License invalid");
+                setOfflineStep("invalid");
             }
         } catch {
-            setLicenseError("라이선스 확인 중 오류가 발생했습니다");
+            setLicenseError("License check error");
             setOfflineStep("invalid");
         }
     };
-    
+        
     // ── 라이센스 통과 → 오프라인 모드 진입 ──────────────────
     // ✅ NEW: 오프라인 모드 진입 (기존 함수 개선)
     const handleEnterOffline = () => {

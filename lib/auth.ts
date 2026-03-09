@@ -19,7 +19,7 @@ try {
   console.warn('[Auth] Offline DB initialization failed (non-critical):', err);
 }
 
-// ✅ Desktop 모드 감지
+// Desktop 모드 감지
 const IS_DESKTOP_MODE = process.env.PTZ_DESKTOP_MODE === 'true';
 
 export const authOptions: NextAuthOptions = {
@@ -38,12 +38,13 @@ export const authOptions: NextAuthOptions = {
         }
 
         const DB_AUTH_TIMEOUT_MS = 3_000;
+        const modeLabel = IS_DESKTOP_MODE ? 'Desktop' : 'Admin';
         
         // ==========================================
-        // 1단계: 온라인 인증 시도 (모두 동일)
+        // 1. Online authentication (all versions)
         // ==========================================
         try {
-          console.log(`[Auth] 온라인 로그인 시도 (${IS_DESKTOP_MODE ? 'Desktop' : 'Admin'})`, credentials.email);
+          console.log(`[Auth] Online login attempt (${modeLabel}):`, credentials.email);
           const user = await Promise.race([
             prisma.user.findUnique({ 
               where: { email: credentials.email },
@@ -64,9 +65,9 @@ export const authOptions: NextAuthOptions = {
           if (user && user.password) {
             const isValid = await bcrypt.compare(credentials.password, user.password);
             if (isValid) {
-              console.log(`[Auth] ✅ 온라인 로그인 성공 (${IS_DESKTOP_MODE ? 'Desktop' : 'Admin'}):`, credentials.email);
+              console.log(`[Auth] OK Online login success (${modeLabel}):`, credentials.email);
               
-              // 오프라인 DB에 동기화
+              // Sync to offline DB
               try {
                 await saveOfflineUser({
                   email: user.email,
@@ -79,9 +80,9 @@ export const authOptions: NextAuthOptions = {
                   platform: process.platform,
                   appVersion: process.env.npm_package_version,
                 });
-                console.log('[Auth] ✅ 오프라인 DB 동기화:', credentials.email);
+                console.log('[Auth] OK Offline DB sync:', credentials.email);
               } catch (err) {
-                console.warn('[Auth] ⚠️  오프라인 DB 동기화 실패:', err);
+                console.warn('[Auth] WARN Offline DB sync failed:', err);
               }
               
               return {
@@ -93,17 +94,79 @@ export const authOptions: NextAuthOptions = {
             }
           }
         } catch (error) {
-          console.log(`[Auth] 온라인 DB 연결 불가 (${IS_DESKTOP_MODE ? 'Desktop' : 'Admin'}):`, error instanceof Error ? error.message : String(error));
+          console.log(`[Auth] Online DB unavailable (${modeLabel}):`, error instanceof Error ? error.message : String(error));
         }
 
         // ==========================================
-        // 2단계: 오프라인 폴백 (Desktop만)
+        // 2. Offline fallback (Desktop only)
         // ==========================================
         if (IS_DESKTOP_MODE) {
-          console.log('[Auth] Desktop 오프라인 폴백 시도:', credentials.email);
+          console.log('[Auth] Desktop offline fallback attempt:', credentials.email);
           try {
-            // ✅ Desktop: 라이선스 검증 필수
+            // License verification required
             const licenseStatus = await verifyOfflineLicense();
             if (!licenseStatus.valid) {
-              console.warn('[Auth] ❌ Desktop 오프라인: 라이선스 없음 또<span class="cursor">█</span>
-                
+              console.warn('[Auth] FAIL Desktop offline: no valid license, reason:', licenseStatus.reason);
+              return null;
+            }
+            console.log('[Auth] OK Desktop license verified:', licenseStatus.expiresAt);
+
+            // Local DB authentication after license check
+            const offlineUser = await verifyOfflinePassword(
+              credentials.email,
+              credentials.password,
+              bcrypt
+            );
+            
+            if (offlineUser) {
+              console.log('[Auth] OK Desktop offline login success (license + local DB):', credentials.email);
+              updateOfflineModeStatus(offlineUser.email, true);
+              
+              return {
+                id: offlineUser.id,
+                email: offlineUser.email,
+                name: offlineUser.name,
+                role: offlineUser.role,
+              };
+            } else {
+              console.warn('[Auth] FAIL Desktop offline login: password mismatch');
+            }
+          } catch (err) {
+            console.error('[Auth] ERROR Desktop offline auth error:', err instanceof Error ? err.message : String(err));
+          }
+        } else {
+          // Admin: no offline fallback
+          console.warn('[Auth] FAIL Admin online auth failed, no offline fallback:', credentials.email);
+        }
+
+        return null;
+      },
+    }),
+  ],
+
+  session: {
+    strategy: 'jwt',
+    maxAge: 24 * 60 * 60,
+  },
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.role = (user as { role?: string })?.role ?? 'user';
+        token.id = user?.id;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (session?.user) {
+        (session.user as { role?: string }).role = token?.role as string;
+        (session.user as { id?: string }).id = token?.id as string;
+      }
+      return session;
+    },
+  },
+  pages: {
+    signIn: '/login',
+  },
+  secret: process.env.NEXTAUTH_SECRET,
+};
+
