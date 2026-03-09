@@ -23,16 +23,15 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-// ── 오프라인 라이센스 UI 단계 ───────────────────────────────
 type OfflineStep =
-    | "idle"              // 오프라인 배너만 표시
-    | "check"             // 기존 라이센스 확인 중
-    | "licensed"          // 유효한 라이센스 있음 → 바로 진행 가능
-    | "no_license"        // 라이센스 없음 → 요청 파일 안내
-    | "upload"            // 라이센스 파일 업로드 대기
-    | "invalid"           // 라이센스 검증 실패
-    | "new_user_info"     // ✅ NEW: 신규 사용자 정보 입력
-    | "user_confirm";     // ✅ NEW: 사용자 승인 대기
+    | "idle"
+    | "check"
+    | "licensed"
+    | "no_license"
+    | "upload"
+    | "invalid"
+    | "new_user_info"
+    | "user_confirm";
 
 export default function LoginPage() {
     const router = useRouter();
@@ -57,17 +56,27 @@ export default function LoginPage() {
     const [uploading, setUploading] = useState(false);
     const [downloadingReq, setDownloadingReq] = useState(false);
 
-    // ✅ NEW: 신규 사용자 정보 입력 상태
+    // ✅ 신규 사용자 정보 입력 상태
     const [newUserInfo, setNewUserInfo] = useState({
         name: "",
         organization: "",
     });
     const [userCreated, setUserCreated] = useState(false);
-    
-    // 페이지 로드 시 DB 연결 상태 확인 (서버 측 타임아웃 3초 이내 응답)
+
+    // ✅ 사용자 정보 수집 다이얼로그 상태 (이곳에 추가!)
+    const [showUserInfoDialog, setShowUserInfoDialog] = useState(false);
+    const [userInfoForRequest, setUserInfoForRequest] = useState({
+        email: "",
+        name: "",
+        organization: "",
+    });
+
+    // ── useEffect ──────────────────────────────────────────
     useEffect(() => {
         checkOfflineStatus();
     }, []);
+
+    // ── 함수들 ────────────────────────────────────────────────
 
     const checkOfflineStatus = async () => {
         setOfflineChecking(true);
@@ -75,7 +84,6 @@ export default function LoginPage() {
             const res = await fetch("/api/offline-status");
             const data = await res.json();
             setIsOffline(data.offline);
-            // 오프라인 확인 즉시 라이선스 체크 시작 (Desktop 자동 진입 지원)
             if (data.offline) {
                 await checkLicenseAutoEnter();
             }
@@ -87,8 +95,6 @@ export default function LoginPage() {
         }
     };
 
-    // 오프라인 확인 즉시 유효 라이선스 존재 시 자동으로 licensed 단계로 이동
-    // → Desktop에서 새로고침 없이도 바로 오프라인 모드 진입 가능
     const checkLicenseAutoEnter = async () => {
         try {
             const res = await fetch("/api/license/verify");
@@ -107,7 +113,6 @@ export default function LoginPage() {
         }
     };
 
-    // DB 재연결 시도
     const handleRetryConnection = async () => {
         setRetrying(true);
         setError("");
@@ -123,7 +128,6 @@ export default function LoginPage() {
         }
     };
 
-    // ── "오프라인으로 계속" 클릭 → 라이센스 확인 ────────────
     const handleOfflineClick = async () => {
         setOfflineStep("check");
         setLicenseError("");
@@ -144,40 +148,98 @@ export default function LoginPage() {
             setOfflineStep("invalid");
         }
     };
-        
-    // ── 라이센스 통과 → 오프라인 모드 진입 ──────────────────
-    // ✅ NEW: 오프라인 모드 진입 (기존 함수 개선)
+
     const handleEnterOffline = () => {
         sessionStorage.setItem("offlineMode", "true");
         console.log('[Login] Entering offline mode');
         router.replace("/dashboard");
     };
 
-    // ── 요청 파일 다운로드 ───────────────────────────────────
-    const handleDownloadRequest = async () => {
-        setDownloadingReq(true);
+    // ✅ 사용자 정보 수집 다이얼로그 표시
+    const handleCollectUserInfo = async () => {
         try {
-            const res = await fetch("/api/license/request");
+            const res = await fetch("/api/auth/session");
+            const data = await res.json();
+
+            if (data?.user?.email) {
+                setUserInfoForRequest({
+                    email: data.user.email,
+                    name: data.user.name || "",
+                    organization: data.user.organization || "",
+                });
+            } else {
+                setUserInfoForRequest({ email: "", name: "", organization: "" });
+            }
+        } catch (err) {
+            console.warn("[Login] Failed to fetch session:", err);
+            setUserInfoForRequest({ email: "", name: "", organization: "" });
+        }
+
+        setShowUserInfoDialog(true);
+    };
+
+    // ✅ 다이얼로그에서 "다운로드" 버튼 클릭
+    const handleDownloadRequestWithUserInfo = async () => {
+        if (!userInfoForRequest.email?.trim()) {
+            setLicenseError("이메일을 입력하세요");
+            return;
+        }
+        if (!userInfoForRequest.name?.trim()) {
+            setLicenseError("이름을 입력하세요");
+            return;
+        }
+        if (!userInfoForRequest.organization?.trim()) {
+            setLicenseError("회사/소속을 입력하세요");
+            return;
+        }
+
+        setDownloadingReq(true);
+        setLicenseError("");
+
+        try {
+            const params = new URLSearchParams({
+                email: userInfoForRequest.email.trim(),
+                name: userInfoForRequest.name.trim(),
+                org: userInfoForRequest.organization.trim(),
+            });
+
+            const res = await fetch(`/api/license/request?${params.toString()}`);
             if (!res.ok) throw new Error("요청 파일 생성 실패");
+
             const blob = await res.blob();
             const cd = res.headers.get("Content-Disposition") ?? "";
-            const name = cd.match(/filename="(.+)"/)?.[1] ?? "license.ptzreq";
+            const filename = cd.match(/filename="(.+)"/)?.[1] ?? "license.ptzreq";
+
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
-            a.download = name;
+            a.download = filename;
             a.click();
             URL.revokeObjectURL(url);
-            // 다운로드 후 업로드 단계로 이동
+
+            setShowUserInfoDialog(false);
             setOfflineStep("upload");
+
+            console.log("[Login] License request downloaded successfully");
         } catch (e) {
             setLicenseError((e as Error).message);
+            console.error("[Login] Download failed:", e);
         } finally {
             setDownloadingReq(false);
         }
     };
 
-    // ── 로그인 / 회원가입 폼 제출 ────────────────────────
+    // ✅ 다이얼로그에서 "취소" 버튼 클릭
+    const handleCancelUserInfoDialog = () => {
+        setShowUserInfoDialog(false);
+        setLicenseError("");
+    };
+
+    // ✅ 요청 파일 다운로드 버튼 클릭 (다이얼로그 표시)
+    const handleDownloadRequest = async () => {
+        await handleCollectUserInfo();
+    };
+
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setLoading(true);
@@ -185,9 +247,6 @@ export default function LoginPage() {
 
         try {
             if (isLogin) {
-                // ───────────────────────────────────────────
-                // 로그인 모드
-                // ───────────────────────────────────────────
                 if (!email || !password) {
                     setError("이메일과 비밀번호를 입력해주세요");
                     setLoading(false);
@@ -196,7 +255,6 @@ export default function LoginPage() {
 
                 console.log('[Login] 온라인 로그인 시도:', email);
 
-                // NextAuth 자격증명 제공자로 로그인
                 const result = await signIn("credentials", {
                     email,
                     password,
@@ -204,7 +262,7 @@ export default function LoginPage() {
                 });
 
                 if (result?.error) {
-                    console.error('[Login] ❌ 로그인 실패:', result.error);
+                    console.error('[Login] 로그인 실패:', result.error);
                     setError(
                         result.error === "CredentialsSignin"
                             ? "이메일 또는 비밀번호가 올바르지 않습니다"
@@ -215,17 +273,11 @@ export default function LoginPage() {
                 }
 
                 if (result?.ok) {
-                    console.log('[Login] ✅ 온라인 로그인 성공:', email);
-                    setError("");
-                    
-                    // 대시보드로 이동
+                    console.log('[Login] 온라인 로그인 성공:', email);
                     router.replace("/dashboard");
                     return;
                 }
             } else {
-                // ───────────────────────────────────────────
-                // 회원가입 모드
-                // ───────────────────────────────────────────
                 if (!email || !password || !name || !organization) {
                     setError("모든 필드를 입력해주세요");
                     setLoading(false);
@@ -259,9 +311,8 @@ export default function LoginPage() {
                     return;
                 }
 
-                console.log('[Login] ✅ 회원가입 성공:', email);
-                
-                // 회원가입 성공 → 로그인 폼으로 전환
+                console.log('[Login] 회원가입 성공:', email);
+
                 setIsLogin(true);
                 setEmail("");
                 setPassword("");
@@ -273,7 +324,7 @@ export default function LoginPage() {
                 return;
             }
         } catch (err) {
-            console.error('[Login] ❌ 오류:', err);
+            console.error('[Login] 오류:', err);
             setError(
                 err instanceof Error
                     ? err.message
@@ -282,9 +333,8 @@ export default function LoginPage() {
         } finally {
             setLoading(false);
         }
-    };    
-    // ── 라이센스 파일 업로드 + 검증 ─────────────────────────
-    // ✅ NEW: 라이센스 업로드 후 처리
+    };
+
     const handleLicenseUpload = async (
         e: React.ChangeEvent<HTMLInputElement>,
     ) => {
@@ -295,31 +345,30 @@ export default function LoginPage() {
         try {
             const formData = new FormData();
             formData.append("license", file);
-            
-            const apiEndpoint = isOffline 
+
+            const apiEndpoint = isOffline
                 ? "/api/license/request-upload"
                 : "/api/license/verify";
-            
+
             console.log('[Login] Uploading license to:', apiEndpoint);
-            
+
             const res = await fetch(apiEndpoint, {
                 method: "POST",
                 body: formData,
             });
             const data = await res.json();
-            
+
             if (res.ok && data.success) {
                 setLicenseInfo({ expiresAt: data.expiresAt });
-                
-                // ✅ NEW: userCreated 필드 확인
+
                 if (data.userCreated) {
                     console.log('[Login] New user created, showing info form');
                     setUserCreated(true);
-                    setOfflineStep("new_user_info");  // ← 신규 사용자 정보 입력 단계
+                    setOfflineStep("new_user_info");
                 } else {
                     console.log('[Login] Existing user, entering offline mode');
                     setUserCreated(false);
-                    setOfflineStep("licensed");  // ← 바로 진입
+                    setOfflineStep("licensed");
                 }
             } else {
                 const errorMsg = data.error ?? "라이센스 검증에 실패했습니다";
@@ -338,15 +387,12 @@ export default function LoginPage() {
         }
     };
 
-    // ✅ NEW: 사용자 정보 입력 후 오프라인 모드 진입
     const handleEnterOfflineWithInfo = () => {
-        // 사용자 정보 저장 (sessionStorage에 임시 저장)
         if (!newUserInfo.name.trim() || !newUserInfo.organization.trim()) {
             setLicenseError("사용자명과 회사/소속을 모두 입력하세요");
             return;
         }
-        
-        // 사용자 정보 저장 (sessionStorage에 임시 저장)
+
         sessionStorage.setItem(
             'offlineUserInfo',
             JSON.stringify({
@@ -358,10 +404,8 @@ export default function LoginPage() {
         handleEnterOffline();
     };
 
-
     // ── 오프라인 단계별 컨텐츠 렌더링 ───────────────────────
     const renderOfflineContent = () => {
-        // [check] 확인 중 스피너
         if (offlineStep === "check") {
             return (
                 <div className="flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground">
@@ -371,7 +415,6 @@ export default function LoginPage() {
             );
         }
 
-        // [licensed] 유효한 라이센스 확인됨
         if (offlineStep === "licensed") {
             return (
                 <div className="space-y-3">
@@ -397,7 +440,6 @@ export default function LoginPage() {
             );
         }
 
-        // [no_license] 라이센스 없음 → 요청 파일 안내
         if (offlineStep === "no_license") {
             return (
                 <div className="space-y-3">
@@ -434,7 +476,6 @@ export default function LoginPage() {
             );
         }
 
-        // [upload] 요청 파일 다운로드 완료 → 라이센스 파일 대기
         if (offlineStep === "upload") {
             return (
                 <div className="space-y-3">
@@ -480,7 +521,6 @@ export default function LoginPage() {
             );
         }
 
-        // [invalid] 라이센스 검증 실패
         if (offlineStep === "invalid") {
             return (
                 <div className="space-y-3">
@@ -513,7 +553,6 @@ export default function LoginPage() {
             );
         }
 
-        // ✅ NEW: [new_user_info] 신규 사용자 정보 입력
         if (offlineStep === "new_user_info") {
             return (
                 <div className="space-y-4">
@@ -523,7 +562,7 @@ export default function LoginPage() {
                             라이센스 검증 완료
                         </span>
                     </div>
-                    
+
                     <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
                         <p className="text-xs text-blue-700 font-medium">
                             ℹ️ 오프라인 모드로 사용할 사용자 정보를 입력하세요
@@ -595,11 +634,7 @@ export default function LoginPage() {
                 </div>
             );
         }
-        
-        // ✅ NEW: [user_confirm] 사용자 승인 대기 (선택사항)
-        // 현재는 new_user_info에서 바로 진입하므로 생략
-        // 필요시 추가 가능
-        // [idle] 초기 오프라인 배너
+
         return (
             <div className="space-y-3">
                 <div className="flex items-center gap-2">
@@ -657,7 +692,7 @@ export default function LoginPage() {
                             : "Create an account"}
                     </p>
 
-                    {/* ── 오프라인 배너 (DB 오프라인일 때만 표시) ─────── */}
+                    {/* 오프라인 배너 */}
                     <AnimatePresence>
                         {!offlineChecking && isOffline && (
                             <motion.div
@@ -673,7 +708,7 @@ export default function LoginPage() {
                         )}
                     </AnimatePresence>
 
-                    {/* ── 에러 메시지 ──────────────────────────────── */}
+                    {/* 에러 메시지 */}
                     {error && (
                         <motion.div
                             initial={{ opacity: 0 }}
@@ -684,107 +719,109 @@ export default function LoginPage() {
                         </motion.div>
                     )}
 
-                    {/* ── 로그인 / 회원가입 폼 (오프라인 시 숨김) ──── */}
-                    {!isOffline && <form onSubmit={handleSubmit} className="space-y-5">
-                        {!isLogin && (
-                            <>
-                                <div>
-                                    <label className="block text-sm font-medium mb-2">
-                                        이름 <span className="text-destructive">*</span>
-                                    </label>
-                                    <div className="relative">
-                                        <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                                        <input
-                                            type="text"
-                                            value={name}
-                                            required
-                                            onChange={(e) => setName(e?.target?.value ?? "")}
-                                            className="w-full pl-11 pr-4 py-3 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                                            placeholder="홍길동"
-                                        />
+                    {/* 로그인 / 회원가입 폼 */}
+                    {!isOffline && (
+                        <form onSubmit={handleSubmit} className="space-y-5">
+                            {!isLogin && (
+                                <>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-2">
+                                            이름 <span className="text-destructive">*</span>
+                                        </label>
+                                        <div className="relative">
+                                            <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                                            <input
+                                                type="text"
+                                                value={name}
+                                                required
+                                                onChange={(e) => setName(e?.target?.value ?? "")}
+                                                className="w-full pl-11 pr-4 py-3 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                                                placeholder="홍길동"
+                                            />
+                                        </div>
                                     </div>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium mb-2">
-                                        회사/소속 <span className="text-destructive">*</span>
-                                    </label>
-                                    <div className="relative">
-                                        <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                                        <input
-                                            type="text"
-                                            value={organization}
-                                            required
-                                            onChange={(e) => setOrganization(e?.target?.value ?? "")}
-                                            className="w-full pl-11 pr-4 py-3 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                                            placeholder="(주)예시회사"
-                                        />
+                                    <div>
+                                        <label className="block text-sm font-medium mb-2">
+                                            회사/소속 <span className="text-destructive">*</span>
+                                        </label>
+                                        <div className="relative">
+                                            <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                                            <input
+                                                type="text"
+                                                value={organization}
+                                                required
+                                                onChange={(e) => setOrganization(e?.target?.value ?? "")}
+                                                className="w-full pl-11 pr-4 py-3 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                                                placeholder="(주)예시회사"
+                                            />
+                                        </div>
                                     </div>
-                                </div>
-                            </>
-                        )}
-                        <div>
-                            <label className="block text-sm font-medium mb-2">
-                                Email
-                            </label>
-                            <div className="relative">
-                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                                <input
-                                    type="email"
-                                    value={email}
-                                    onChange={(e) =>
-                                        setEmail(e?.target?.value ?? "")
-                                    }
-                                    className="w-full pl-11 pr-4 py-3 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                                    placeholder="you@example.com"
-                                    required
-                                />
-                            </div>
-                        </div>
-                        <div>
-                            <label className="block text-sm font-medium mb-2">
-                                Password
-                            </label>
-                            <div className="relative">
-                                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                                <input
-                                    type={showPassword ? "text" : "password"}
-                                    value={password}
-                                    onChange={(e) =>
-                                        setPassword(e?.target?.value ?? "")
-                                    }
-                                    className="w-full pl-11 pr-12 py-3 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                                    placeholder="••••••••"
-                                    required
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() =>
-                                        setShowPassword(!showPassword)
-                                    }
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                                >
-                                    {showPassword ? (
-                                        <EyeOff className="w-5 h-5" />
-                                    ) : (
-                                        <Eye className="w-5 h-5" />
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full py-3 bg-primary hover:bg-primary/90 disabled:bg-primary/50 text-primary-foreground font-medium rounded-lg transition-all flex items-center justify-center gap-2"
-                        >
-                            {loading ? (
-                                <Loader2 className="w-5 h-5 animate-spin" />
-                            ) : isLogin ? (
-                                "Sign In"
-                            ) : (
-                                "Create Account"
+                                </>
                             )}
-                        </button>
-                    </form>}
+                            <div>
+                                <label className="block text-sm font-medium mb-2">
+                                    Email
+                                </label>
+                                <div className="relative">
+                                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                                    <input
+                                        type="email"
+                                        value={email}
+                                        onChange={(e) =>
+                                            setEmail(e?.target?.value ?? "")
+                                        }
+                                        className="w-full pl-11 pr-4 py-3 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                                        placeholder="you@example.com"
+                                        required
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-2">
+                                    Password
+                                </label>
+                                <div className="relative">
+                                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                                    <input
+                                        type={showPassword ? "text" : "password"}
+                                        value={password}
+                                        onChange={(e) =>
+                                            setPassword(e?.target?.value ?? "")
+                                        }
+                                        className="w-full pl-11 pr-12 py-3 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                                        placeholder="••••••••"
+                                        required
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            setShowPassword(!showPassword)
+                                        }
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                    >
+                                        {showPassword ? (
+                                            <EyeOff className="w-5 h-5" />
+                                        ) : (
+                                            <Eye className="w-5 h-5" />
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="w-full py-3 bg-primary hover:bg-primary/90 disabled:bg-primary/50 text-primary-foreground font-medium rounded-lg transition-all flex items-center justify-center gap-2"
+                            >
+                                {loading ? (
+                                    <Loader2 className="w-5 h-5 animate-spin" />
+                                ) : isLogin ? (
+                                    "Sign In"
+                                ) : (
+                                    "Create Account"
+                                )}
+                            </button>
+                        </form>
+                    )}
 
                     <div className="mt-6 text-center">
                         <button
@@ -806,6 +843,125 @@ export default function LoginPage() {
                     </div>
                 </div>
             </motion.div>
+
+            {/* ✅ 사용자 정보 수집 다이얼로그 */}
+            <AnimatePresence>
+                {showUserInfoDialog && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+                        onClick={handleCancelUserInfoDialog}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.95, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.95, opacity: 0 }}
+                            className="bg-card rounded-xl shadow-2xl max-w-md w-full p-6 border border-border"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+                                <Mail className="w-5 h-5 text-primary" />
+                                라이선스 요청 정보
+                            </h3>
+
+                            <p className="text-xs text-muted-foreground mb-4">
+                                아래 정보를 입력하면 요청 파일이 생성됩니다.
+                            </p>
+
+                            {licenseError && (
+                                <div className="bg-destructive/10 border border-destructive/30 text-destructive text-xs p-3 rounded-lg mb-4">
+                                    {licenseError}
+                                </div>
+                            )}
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">
+                                        이메일 <span className="text-destructive">*</span>
+                                    </label>
+                                    <input
+                                        type="email"
+                                        value={userInfoForRequest.email}
+                                        onChange={(e) =>
+                                            setUserInfoForRequest({
+                                                ...userInfoForRequest,
+                                                email: e.target.value,
+                                            })
+                                        }
+                                        placeholder="user@example.com"
+                                        className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                                        autoFocus
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">
+                                        이름 <span className="text-destructive">*</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={userInfoForRequest.name}
+                                        onChange={(e) =>
+                                            setUserInfoForRequest({
+                                                ...userInfoForRequest,
+                                                name: e.target.value,
+                                            })
+                                        }
+                                        placeholder="홍길동"
+                                        className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium mb-2">
+                                        회사/소속 <span className="text-destructive">*</span>
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={userInfoForRequest.organization}
+                                        onChange={(e) =>
+                                            setUserInfoForRequest({
+                                                ...userInfoForRequest,
+                                                organization: e.target.value,
+                                            })
+                                        }
+                                        placeholder="(주)예시회사"
+                                        className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex gap-2 mt-6">
+                                <button
+                                    onClick={handleCancelUserInfoDialog}
+                                    className="flex-1 py-2 bg-muted hover:bg-muted/80 text-sm font-medium rounded-lg transition-colors"
+                                >
+                                    취소
+                                </button>
+                                <button
+                                    onClick={handleDownloadRequestWithUserInfo}
+                                    disabled={downloadingReq}
+                                    className="flex-1 py-2 bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+                                >
+                                    {downloadingReq ? (
+                                        <>
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                            생성 중...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Download className="w-4 h-4" />
+                                            파일 다운로드
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

@@ -1,141 +1,205 @@
-// ✅ 수정된 코드: ptzcontroller_admin/app/api/license/request/route.ts
+// app/api/license/request/route.ts
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/db";
-import { getAllMachineIds, REQUEST_FILE_PATH } from "@/lib/license";
+import { getAllMachineIds } from "@/lib/license";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 
-const PRODUCT_ID     = "PTZ-OFFLINE";
-const MASTER_SECRET  = process.env.LICENSE_SECRET ?? "TYCHE-PTZ-GOOD-BLESS-2026";
+const PRODUCT_ID = "PTZ-OFFLINE";
+const MASTER_SECRET = process.env.LICENSE_SECRET ?? "TYCHE-PTZ-GOOD-BLESS-2026";
 
 /**
  * GET /api/license/request
- * 현재 로그인 사용자의 userId/userName/userOrg + MachineID를 포함한
- * .ptzreq 파일을 생성하여 다운로드 응답으로 반환.
- * 관리자가 이 파일을 열면 이름/소속/userId가 자동으로 채워짐.
+ * 
+ * 완전 오프라인 대응:
+ * 1. 세션에서 사용자 정보 읽기 (온라인)
+ * 2. 쿼리 파라미터에서 읽기 (오프라인)
+ * 3. 머신ID 수집 (실패해도 무시하고 UNKNOWN 사용)
+ * 4. 요청 파일 생성 및 다운로드 제공
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
     try {
-        // ───────────────────────────────────────────────────────────
-        // 1단계: 세션에서 사용자 정보 추출
-        // ───────────────────────────────────────────────────────────
-        const session = await getServerSession(authOptions);
-        const sessionUser = session?.user as { id?: string; email?: string } | undefined;
-        const userEmail = sessionUser?.email ?? "";
+        console.log('[License] Request file generation started');
+        
+        const searchParams = request.nextUrl.searchParams;
 
-        if (!userEmail) {
-            return NextResponse.json(
-                { error: "사용자 이메일을 찾을 수 없습니다" },
-                { status: 401 }
-            );
-        }
-
-        // ───────────────────────────────────────────────────────────
-        // 2단계: DB에서 사용자 정보 조회 (이메일 기반)
-        // ───────────────────────────────────────────────────────────
-        let userId = sessionUser?.id ?? "unknown";
+        // ──────────────────────────────────────────────────────────
+        // 1단계: 사용자 정보 수집 (다중 경로)
+        // ──────────────────────────────────────────────────────────
+        
+        let userEmail = "";
         let userName = "";
-        let userOrg  = "";
+        let userOrg = "";
+        let userId = "offline";
 
+        // ✅ 경로 1: 세션에서 사용자 정보 추출 (온라인)
         try {
-            // ✅ 수정: id 대신 email으로 조회 (온/오프라인 모두 지원)
-            const dbUser = await prisma.user.findUnique({
-                where: { email: userEmail },  // ← id 대신 email 사용
-                select: { 
-                    id: true,  // ← userId도 업데이트
-                    name: true, 
-                    organization: true, 
-                    email: true 
-                },
-            });
-            if (dbUser) {
-                userId = dbUser.id;
-                userName = dbUser.name || "";
-                userOrg = dbUser.organization || "";
-                console.log('[License] User info loaded from DB:', userEmail);
+            const session = await getServerSession(authOptions);
+            if (session?.user?.email) {
+                userEmail = session.user.email;
+                userName = (session.user as any)?.name || "";
+                userOrg = (session.user as any)?.organization || "";
+                userId = (session.user as any)?.id || "offline";
+                console.log('[License] User info from session:', userEmail);
             }
-        } catch (dbErr) {
-            console.warn('[License] DB lookup failed, using session data only:', dbErr);
-            // DB 오류 시: 세션의 이메일만으로도 진행 가능
-            // (아래에서 userId = "unknown"일 수 있으나 이메일은 확보)
+        } catch (sessionErr) {
+            console.warn('[License] Session fetch failed (expected in offline):', 
+                (sessionErr as Error).message);
         }
 
-        // ───────────────────────────────────────────────────────────
-        // 3단계: 하드웨어 ID 수집
-        // ───────────────────────────────────────────────────────────
-        const machineIds  = getAllMachineIds();
-        const machineId   = machineIds[0] ?? "UNKNOWN";
-        const requestedAt = new Date().toISOString();
+        // ✅ 경로 2: 쿼리 파라미터에서 사용자 정보 읽기 (오프라인 다이얼로그)
+        if (!userEmail) {
+            const paramEmail = searchParams.get("email");
+            const paramName = searchParams.get("name");
+            const paramOrg = searchParams.get("org");
 
-        console.log('[License] Request file generation:', {
-            userEmail,
+            if (paramEmail) {
+                userEmail = paramEmail;
+                userName = paramName || "";
+                userOrg = paramOrg || "";
+                userId = "offline";
+                console.log('[License] User info from query params:', userEmail);
+            }
+        }
+
+        // ✅ 경로 3: 최후의 수단 (기본값)
+        if (!userEmail) {
+            console.warn('[License] No user email provided, using defaults');
+            userEmail = "unknown@localhost";
+            userName = "Unknown User";
+            userOrg = "Unknown Organization";
+            userId = "offline";
+        }
+
+        // ──────────────────────────────────────────────────────────
+        // 2단계: 머신ID 수집 (실패해도 계속)
+        // ──────────────────────────────────────────────────────────
+        let machineIds: string[] = [];
+        let machineId = "UNKNOWN";
+        
+        try {
+            machineIds = getAllMachineIds();
+            machineId = machineIds[0] ?? "UNKNOWN";
+            console.log('[License] Machine IDs collected:', {
+                count: machineIds.length,
+                primary: machineId,
+            });
+        } catch (machineErr) {
+            console.error('[License] Failed to get machine IDs:', 
+                (machineErr as Error).message);
+            console.warn('[License] Using fallback machine ID: UNKNOWN');
+            machineIds = ["UNKNOWN"];
+            machineId = "UNKNOWN";
+        }
+
+        // ──────────────────────────────────────────────────────────
+        // 3단계: 요청 페이로드 생성 및 서명
+        // ──────────────────────────────────────────────────────────
+        const requestedAt = new Date().toISOString();
+        
+        const payload = {
             userId,
+            userName: userName || "Unknown",
+            userOrg: userOrg || "Unknown",
+            userEmail,
+            machineId,
+            machineIds: machineIds.length > 0 ? machineIds : ["UNKNOWN"],
+            requestedAt,
+            product: PRODUCT_ID,
+        };
+
+        // HMAC 서명 (머신ID와 시간기반, userId 제외)
+        const signatureData = {
+            machineId,
+            machineIds: machineIds.length > 0 ? machineIds : ["UNKNOWN"],
+            requestedAt,
+            product: PRODUCT_ID,
+        };
+
+        const sig = crypto
+            .createHmac("sha256", MASTER_SECRET)
+            .update(JSON.stringify(signatureData))
+            .digest("hex")
+            .slice(0, 16);
+
+        console.log('[License] Payload generated:', {
+            userEmail,
             userName,
             userOrg,
             machineId,
             machineIdCount: machineIds.length,
         });
 
-        // ───────────────────────────────────────────────────────────
-        // 4단계: 페이로드 생성 및 서명
-        // ───────────────────────────────────────────────────────────
-        const payload = {
-            userId,
-            userName,
-            userOrg,
-            userEmail,
-            machineId,
-            machineIds,
-            requestedAt,
-            product: PRODUCT_ID,
-        };
-
-        // HMAC 서명 (요청 파일 무결성 검증용)
-        const sig = crypto
-            .createHmac("sha256", MASTER_SECRET)
-            .update(JSON.stringify({ machineId, machineIds, requestedAt, product: PRODUCT_ID }))
-            .digest("hex")
-            .slice(0, 16);
-
-        // ───────────────────────────────────────────────────────────
-        // 5단계: Base64 인코딩
-        // ───────────────────────────────────────────────────────────
+        // ──────────────────────────────────────────────────────────
+        // 4단계: Base64 인코딩
+        // ──────────────────────────────────────────────────────────
         const content = Buffer.from(
             JSON.stringify({ ...payload, sig }, null, 2)
         ).toString("base64");
 
-        // ───────────────────────────────────────────────────────────
-        // 6단계: 로컬 파일에도 저장 (로그 목적)
-        // ───────────────────────────────────────────────────────────
+        console.log('[License] Request file content generated (Base64, size:', 
+            content.length, 'bytes)');
+
+        // ──────────────────────────────────────────────────────────
+        // 5단계: 로컬 파일 저장 시도 (선택사항)
+        // ──────────────────────────────────────────────────────────
         try {
-            fs.mkdirSync(path.dirname(REQUEST_FILE_PATH), { recursive: true });
-            fs.writeFileSync(REQUEST_FILE_PATH, content, "utf8");
-            console.log('[License] Request file saved:', REQUEST_FILE_PATH);
+            const { getLicenseDir } = await import("@/lib/license");
+            const licenseDir = getLicenseDir();
+            const requestFilePath = path.join(licenseDir, "license.ptzreq");
+
+            // 디렉토리 생성 (없으면)
+            if (!fs.existsSync(licenseDir)) {
+                fs.mkdirSync(licenseDir, { recursive: true });
+                console.log('[License] Created license directory:', licenseDir);
+            }
+
+            // 파일 저장
+            fs.writeFileSync(requestFilePath, content, "utf8");
+            console.log('[License] Request file saved locally:', requestFilePath);
         } catch (saveErr) {
-            console.warn('[License] Failed to save request file locally:', saveErr);
-            // 로컬 저장 실패는 무시 (다운로드는 계속 진행)
+            console.warn('[License] Failed to save request file locally:', 
+                (saveErr as Error).message);
+            console.log('[License] Continuing without local save...');
+            // 로컬 저장 실패는 무시하고 계속 진행
         }
 
-        // ───────────────────────────────────────────────────────────
-        // 7단계: 다운로드 응답
-        // ───────────────────────────────────────────────────────────
+        // ──────────────────────────────────────────────────────────
+        // 6단계: 다운로드 응답 제공
+        // ──────────────────────────────────────────────────────────
+        console.log('[License] Sending download response:', {
+            filename: `ptzcontroller-${machineId}.ptzreq`,
+            size: content.length,
+        });
+
         return new NextResponse(content, {
+            status: 200,
             headers: {
                 "Content-Type": "application/octet-stream",
                 "Content-Disposition": `attachment; filename="ptzcontroller-${machineId}.ptzreq"`,
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
             },
         });
     } catch (error) {
         console.error("[License] Request file creation error:", error);
+        
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        
         return NextResponse.json(
-            { error: "요청 파일 생성에 실패했습니다" },
-            { status: 500 },
+            {
+                error: "요청 파일 생성에 실패했습니다",
+                detail: errorMessage,
+                code: "LICENSE_REQUEST_FAILED",
+            },
+            { status: 500 }
         );
     }
 }
+
+
