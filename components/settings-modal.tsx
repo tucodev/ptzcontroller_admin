@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Settings, Loader2, Save, Moon, Sun, Monitor,
   ShieldCheck, ShieldAlert, ShieldOff, Clock, Send, RefreshCw,
-  Upload, Download,
+  Upload, Download, AlertTriangle,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { AppSettings } from '@/lib/types';
@@ -15,12 +15,14 @@ interface SettingsModalProps {
 }
 
 type LicenseRequestStatus =
-  | 'idle'       // 라이선스 없음
-  | 'requesting' // 요청 전송 중
-  | 'pending'    // 승인 대기 중
-  | 'approved'   // 라이선스 보유
-  | 'rejected'   // 거절됨
-  | 'error';     // 오류
+  | 'idle'        // 라이선스 없음
+  | 'gathering'   // HW 정보 + 사용자 정보 수집 중
+  | 'confirming'  // 요청 정보 확인/편집 다이얼로그 표시 중
+  | 'requesting'  // 요청 전송 중
+  | 'pending'     // 승인 대기 중
+  | 'approved'    // 라이선스 보유
+  | 'rejected'    // 거절됨
+  | 'error';      // 오류
 
 interface LicenseState {
   status:     LicenseRequestStatus;
@@ -29,6 +31,13 @@ interface LicenseState {
   expiresAt:  string;
   machineId:  string;
   licenseB64: string; // 방금 발급받은 라이선스 데이터 (다운로드/폴더저장용)
+}
+
+// 확인 다이얼로그에서 보여줄 수집된 정보
+interface ConfirmInfo {
+  email:      string;
+  machineIds: string[];
+  fromProxy:  boolean; // true: ptz-proxy에서 수집, false: 서버 측 HW ID 사용
 }
 
 const POLL_MS = 30_000;          // 폴링 간격 30초
@@ -53,6 +62,15 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   });
   const [savingFile, setSavingFile] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Proxy 실행 상태 (idle 상태 버튼 제어) ─────────────────
+  // 'checking': 확인 중 | 'running': 실행 중 | 'stopped': 미실행
+  const [proxyStatus, setProxyStatus] = useState<'checking' | 'running' | 'stopped'>('checking');
+
+  // ── 확인 다이얼로그 상태 ──────────────────────────────────
+  const [confirmInfo,  setConfirmInfo]  = useState<ConfirmInfo | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editOrg,  setEditOrg]  = useState('');
 
   useEffect(() => {
     fetchSettings();
@@ -118,33 +136,79 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     } catch { /* 네트워크 오류는 다음 폴링 때 재시도 */ }
   };
 
-  // ── 라이선스 발급 요청 ────────────────────────────────────
-  const handleRequest = async () => {
-    setLic(prev => ({ ...prev, status: 'requesting', message: '' }));
-    try {
-      // 1) proxy에서 HW 정보 수집 시도 (proxy가 실행 중인 경우)
-      let proxyMachineIds: string[] | null = null;
-      try {
-        const hwRes = await fetch(
-          `http://localhost:${settings.proxyPort}/hw-info`,
-          { signal: AbortSignal.timeout(5_000) }
-        );
-        if (hwRes.ok) {
-          const hwData = await hwRes.json();
-          if (Array.isArray(hwData.machineIds) && hwData.machineIds.length > 0) {
-            proxyMachineIds = hwData.machineIds as string[];
-          }
-        }
-      } catch { /* proxy 미실행 또는 연결 불가 → 서버측 HW ID 폴백 */ }
+  // ── 1단계: 정보 수집 후 확인 다이얼로그 표시 ─────────────
+  // 버튼 클릭 시 처음 진입하는 함수
+  const handleInitiateRequest = async () => {
+    setLic(prev => ({ ...prev, status: 'gathering', message: '' }));
 
-      // 2) 라이선스 요청 (proxy HW ID 있으면 body에 포함)
-      const reqBody = proxyMachineIds
-        ? JSON.stringify({ machineIds: proxyMachineIds })
-        : undefined;
+    // 1) ptz-proxy-electron 에서 HW 정보 수집 (필수)
+    let machineIds: string[] = [];
+    let fromProxy = false;
+    try {
+      const hwRes = await fetch(
+        `http://localhost:${settings.proxyPort}/hw-info`,
+        { signal: AbortSignal.timeout(5_000) }
+      );
+      if (hwRes.ok) {
+        const hw = await hwRes.json();
+        if (Array.isArray(hw.machineIds) && hw.machineIds.length > 0) {
+          machineIds = hw.machineIds as string[];
+          fromProxy = true;
+        }
+      }
+    } catch { /* proxy 미실행 */ }
+
+    // proxy에서 HW 정보를 얻지 못하면 진행 불가 → idle 복귀
+    // (서버 측 HW ID로 발급하면 엉뚱한 머신에 라이선스가 발급됨)
+    if (!fromProxy) {
+      setProxyStatus('stopped');
+      setLic(prev => ({ ...prev, status: 'idle' }));
+      return;
+    }
+
+    // 2) 세션에서 사용자 정보 수집
+    let email = '';
+    let name  = '';
+    let org   = '';
+    try {
+      const s = await (await fetch('/api/auth/session')).json();
+      email = s?.user?.email ?? '';
+      name  = s?.user?.name  ?? '';
+      org   = (s?.user as { organization?: string })?.organization ?? '';
+    } catch { /* ignore */ }
+
+    // 3) 확인 다이얼로그 표시 (항상 fromProxy=true 보장)
+    setConfirmInfo({ email, machineIds, fromProxy });
+    setEditName(name);
+    setEditOrg(org);
+    setLic(prev => ({ ...prev, status: 'confirming' }));
+  };
+
+  // ── 2단계: 확인 후 실제 API 호출 ─────────────────────────
+  // 사용자가 다이얼로그에서 정보를 확인/수정하고 확인 버튼을 눌렀을 때
+  const handleSubmitRequest = async (
+    name: string,
+    org: string,
+    mIds: string[],
+    fromProxy: boolean,
+  ) => {
+    setConfirmInfo(null);
+    setLic(prev => ({ ...prev, status: 'requesting', message: '' }));
+
+    try {
+      const body: Record<string, unknown> = {
+        name: name.trim(),
+        org:  org.trim(),
+      };
+      // proxy에서 수집한 머신 ID가 있을 때만 body에 포함
+      if (fromProxy && mIds.length > 0) {
+        body.machineIds = mIds;
+      }
+
       const res  = await fetch('/api/license/request-online', {
-        method: 'POST',
-        headers: reqBody ? { 'Content-Type': 'application/json' } : {},
-        body: reqBody,
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
       });
       const data = await res.json();
 
@@ -184,9 +248,6 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   };
 
   // ── 수동 저장 버튼 핸들러 ─────────────────────────────────
-  // showDirectoryPicker() 는 localhost 에서 시스템 루트(C:\) 접근을 차단함
-  // → 서버 API 를 통해 C:\ProgramData\PTZController\ 에 직접 저장
-  // → ptzcontroller_desktop 도 동일 경로를 읽으므로 별도 복사 불필요
   const handleSaveToFolder = async () => {
     const b64 = lic.licenseB64;
     if (!b64) return;
@@ -234,9 +295,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     }
   };
 
-  // ── 항목3: 오프라인 .ptzreq 요청 파일 다운로드 ──────────────
-  // 인터넷 연결 없이 라이선스를 요청할 때 사용
-  // GET /api/license/request → 브라우저 다운로드 트리거
+  // ── 오프라인 .ptzreq 요청 파일 다운로드 ──────────────────
   const handleDownloadRequest = () => {
     try {
       const a = document.createElement('a');
@@ -250,6 +309,19 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     }
   };
 
+  // ── Proxy 실행 여부 빠른 확인 ────────────────────────────
+  const checkProxyStatus = async (port?: number) => {
+    const proxyPort = port ?? settings.proxyPort;
+    setProxyStatus('checking');
+    try {
+      const res = await fetch(`http://localhost:${proxyPort}/hw-info`,
+        { signal: AbortSignal.timeout(3_000) });
+      setProxyStatus(res.ok ? 'running' : 'stopped');
+    } catch {
+      setProxyStatus('stopped');
+    }
+  };
+
   // ── 설정 조회 / 저장 ──────────────────────────────────────
   const fetchSettings = async () => {
     try {
@@ -258,9 +330,12 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
       if (data?.settings) {
         setSettings(data.settings);
         if (data.settings.theme) setTheme(data.settings.theme);
+        // 설정 로드 후 proxy 상태 확인
+        checkProxyStatus(data.settings.proxyPort);
       }
     } catch (e) {
       console.error('Fetch settings error:', e);
+      setProxyStatus('stopped');
     } finally {
       setLoading(false);
     }
@@ -290,6 +365,98 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const renderLicenseSection = () => {
     const { status, message, expiresAt, machineId, requestId, licenseB64 } = lic;
 
+    // ── gathering: 정보 수집 중 ──────────────────────────────
+    if (status === 'gathering') return (
+      <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        <span>요청 정보를 수집하는 중...</span>
+      </div>
+    );
+
+    // ── confirming: 확인/수정 다이얼로그 ─────────────────────
+    // 이 상태에 도달할 때는 항상 fromProxy=true (handleInitiateRequest에서 보장)
+    if (status === 'confirming' && confirmInfo) return (
+      <div className="space-y-3">
+        <p className="text-xs font-semibold text-foreground">📋 발급 요청 정보 확인</p>
+
+        {/* PTZ Proxy 수집 성공 표시 */}
+        <div className="flex items-center gap-2 px-2.5 py-1.5 bg-green-500/10 border border-green-500/30 rounded-lg">
+          <ShieldCheck className="w-3.5 h-3.5 text-green-500 shrink-0" />
+          <p className="text-xs text-green-600 dark:text-green-400">
+            PTZ Proxy에서 머신 ID {confirmInfo.machineIds.length}개를 수집했습니다
+          </p>
+        </div>
+
+        {/* 이메일 (읽기 전용) */}
+        <div>
+          <label className="block text-xs text-muted-foreground mb-1">이메일 <span className="text-muted-foreground/60">(자동)</span></label>
+          <div className="px-3 py-2 bg-muted/30 border border-border rounded-lg text-sm text-muted-foreground">
+            {confirmInfo.email || '(세션 없음)'}
+          </div>
+        </div>
+
+        {/* 이름 (편집 가능) */}
+        <div>
+          <label className="block text-xs text-muted-foreground mb-1">이름</label>
+          <input
+            type="text"
+            value={editName}
+            onChange={e => setEditName(e.target.value)}
+            placeholder="이름을 입력하세요"
+            className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg text-sm focus:ring-2 focus:ring-primary focus:outline-none"
+          />
+        </div>
+
+        {/* 회사/소속 (편집 가능, 필수) */}
+        <div>
+          <label className="block text-xs text-muted-foreground mb-1">
+            회사/소속 <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            value={editOrg}
+            onChange={e => setEditOrg(e.target.value)}
+            placeholder="회사 또는 소속을 입력하세요 (필수)"
+            className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg text-sm focus:ring-2 focus:ring-primary focus:outline-none"
+          />
+        </div>
+
+        {/* 머신 ID 목록 (항상 proxy에서 수집) */}
+        <div>
+          <label className="block text-xs text-muted-foreground mb-1">
+            수집된 머신 ID
+          </label>
+          <div className="space-y-1 max-h-24 overflow-y-auto">
+            {confirmInfo.machineIds.map((id, i) => (
+              <div key={i} className="px-2 py-1 bg-muted/30 border border-border/50 rounded text-xs font-mono text-muted-foreground truncate">
+                {i === 0 && <span className="text-primary mr-1">★</span>}{id}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 버튼 */}
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={() => {
+              setConfirmInfo(null);
+              setLic(prev => ({ ...prev, status: 'idle' }));
+            }}
+            className="flex-1 py-2 bg-muted hover:bg-muted/80 text-sm rounded-lg transition-colors">
+            취소
+          </button>
+          <button
+            onClick={() => handleSubmitRequest(editName, editOrg, confirmInfo.machineIds, confirmInfo.fromProxy)}
+            disabled={!editOrg.trim()}
+            className="flex-1 py-2 bg-blue-600 hover:bg-blue-600/90 disabled:opacity-40 text-white text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-2">
+            <Send className="w-4 h-4" />
+            발급 요청
+          </button>
+        </div>
+      </div>
+    );
+
+    // ── approved ─────────────────────────────────────────────
     if (status === 'approved') return (
       <div className="space-y-3">
         {/* 상태 표시 */}
@@ -315,14 +482,14 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
           </div>
         )}
 
-        {/* 항목3: 라이선스 갱신/재발급용 요청 파일 다운로드 */}
+        {/* 라이선스 갱신/재발급용 요청 파일 다운로드 */}
         <button onClick={handleDownloadRequest}
           className="w-full py-2 bg-muted hover:bg-muted/80 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
           <Download className="w-4 h-4" />
           갱신 요청 파일 다운로드 (.ptzreq)
         </button>
 
-        {/* 항목4: 파일 직접 등록 (항상 표시) */}
+        {/* 파일 직접 등록 (항상 표시) */}
         <label className="w-full py-2 bg-muted hover:bg-muted/80 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer">
           {savingFile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
           라이선스 파일 직접 등록 (.ptzlic)
@@ -331,6 +498,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
       </div>
     );
 
+    // ── pending ───────────────────────────────────────────────
     if (status === 'pending') return (
       <div className="space-y-2">
         <div className="flex items-start gap-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl">
@@ -346,22 +514,22 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
           </button>
         </div>
         <p className="text-xs text-muted-foreground text-center">30초마다 자동으로 확인합니다</p>
-        
-        {/* ✅ 추가: 새 요청 버튼 */}
-        <button onClick={handleRequest}
+
+        {/* 새 요청 버튼 (확인 다이얼로그 경유) */}
+        <button onClick={handleInitiateRequest}
           className="w-full py-2 bg-blue-600 hover:bg-blue-600/90 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
           <Send className="w-4 h-4" />
           새로 요청하기
         </button>
 
-        {/* 항목3: 오프라인 재요청을 위한 .ptzreq 재다운로드 */}
+        {/* 오프라인 재요청을 위한 .ptzreq 재다운로드 */}
         <button onClick={handleDownloadRequest}
           className="w-full py-2 bg-muted hover:bg-muted/80 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
           <Download className="w-4 h-4" />
           요청 파일 재다운로드 (.ptzreq)
         </button>
 
-        {/* 항목4: 관리자가 수동 발급한 .ptzlic 직접 등록 */}
+        {/* 관리자가 수동 발급한 .ptzlic 직접 등록 */}
         <label className="w-full py-2 bg-muted hover:bg-muted/80 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer">
           <Upload className="w-4 h-4" />
           라이선스 파일 직접 등록 (.ptzlic)
@@ -369,7 +537,8 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
         </label>
       </div>
     );
-    
+
+    // ── rejected ─────────────────────────────────────────────
     if (status === 'rejected') return (
       <div className="space-y-2">
         <div className="flex items-start gap-3 p-3 bg-destructive/10 border border-destructive/30 rounded-xl">
@@ -379,33 +548,36 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
             <p className="text-xs text-muted-foreground mt-0.5">{message}</p>
           </div>
         </div>
-        <button onClick={handleRequest}
+        {/* 재요청도 확인 다이얼로그 경유 */}
+        <button onClick={handleInitiateRequest}
           className="w-full py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
           <Send className="w-4 h-4" />재요청
         </button>
       </div>
     );
 
+    // ── requesting ────────────────────────────────────────────
     if (status === 'requesting') return (
       <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
         <Loader2 className="w-4 h-4 animate-spin" /><span>요청 전송 중...</span>
       </div>
     );
 
+    // ── error ─────────────────────────────────────────────────
     if (status === 'error') return (
       <div className="space-y-2">
         <div className="flex items-start gap-3 p-3 bg-destructive/10 border border-destructive/30 rounded-xl">
           <ShieldOff className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
           <p className="text-xs text-destructive">{message}</p>
         </div>
-        <button onClick={handleRequest}
+        <button onClick={handleInitiateRequest}
           className="w-full py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
           <RefreshCw className="w-4 h-4" />다시 시도
         </button>
       </div>
     );
 
-    // idle
+    // ── idle ──────────────────────────────────────────────────
     return (
       <div className="space-y-3">
         <p className="text-xs text-muted-foreground">
@@ -413,11 +585,41 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
           요청 후 관리자 승인 시 자동으로 저장됩니다.
         </p>
 
-        {/* 온라인 요청 (인터넷 연결 시) */}
-        <button onClick={handleRequest}
-          className="w-full py-2.5 bg-blue-600 hover:bg-blue-600/90 text-white text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-2">
-          <Send className="w-4 h-4" />온라인 라이선스 발급 요청
-        </button>
+        {/* 온라인 요청 — PTZ Proxy 실행 상태에 따라 조건부 표시 */}
+        {proxyStatus === 'checking' && (
+          <div className="flex items-center gap-2 py-2.5 text-sm text-muted-foreground justify-center">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>PTZ Proxy 상태 확인 중...</span>
+          </div>
+        )}
+
+        {proxyStatus === 'running' && (
+          <button onClick={handleInitiateRequest}
+            className="w-full py-2.5 bg-blue-600 hover:bg-blue-600/90 text-white text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-2">
+            <Send className="w-4 h-4" />온라인 라이선스 발급 요청
+          </button>
+        )}
+
+        {proxyStatus === 'stopped' && (
+          <div className="space-y-2">
+            <div className="flex items-start gap-2.5 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl">
+              <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                  PTZ Proxy가 실행되지 않았습니다
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  온라인 발급을 하려면 PTZ Proxy (포트 {settings.proxyPort})를 먼저 실행하세요.
+                </p>
+              </div>
+            </div>
+            <button onClick={() => checkProxyStatus()}
+              className="w-full py-2 bg-muted hover:bg-muted/80 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
+              <RefreshCw className="w-4 h-4" />
+              Proxy 재확인
+            </button>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <div className="flex-1 h-px bg-border" />
@@ -425,7 +627,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
           <div className="flex-1 h-px bg-border" />
         </div>
 
-        {/* 항목3: 오프라인 요청 파일 다운로드 */}
+        {/* 오프라인 요청 파일 다운로드 */}
         <div className="space-y-1.5">
           <button onClick={handleDownloadRequest}
             className="w-full py-2 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
@@ -443,7 +645,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
           <div className="flex-1 h-px bg-border" />
         </div>
 
-        {/* 항목4: .ptzlic 파일 직접 등록 */}
+        {/* .ptzlic 파일 직접 등록 */}
         <label className="w-full py-2 bg-muted hover:bg-muted/80 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer">
           <Upload className="w-4 h-4" />
           라이선스 파일 직접 등록 (.ptzlic)

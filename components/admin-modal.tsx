@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Users, Upload, Trash2, Plus, Shield, ShieldOff,
   Loader2, Check, AlertCircle, Download, RefreshCw,
-  Eye, EyeOff, KeyRound, UserCog, FileDown
+  Eye, EyeOff, KeyRound, UserCog, FileDown, ShieldCheck,
 } from 'lucide-react';
 
 interface AdminModalProps {
@@ -18,6 +18,7 @@ interface UserRow {
   name: string | null;
   organization: string | null;
   role: string;
+  approved: boolean;
   createdAt: string;
 }
 
@@ -125,6 +126,19 @@ export default function AdminModal({ onClose }: AdminModalProps) {
     } finally {
       setEditSaving(false);
     }
+  }
+
+  async function handleToggleApproved(u: UserRow) {
+    const next = !u.approved;
+    const res = await fetch('/api/admin/users', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: u.id, approved: next }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setUserMsg({ type: 'err', text: data.error ?? 'Failed' }); return; }
+    setUserMsg({ type: 'ok', text: `"${u.email}" ${next ? '승인됨' : '승인 취소됨'}.` });
+    fetchUsers();
   }
 
   async function handleDeleteUser(u: UserRow) {
@@ -383,9 +397,36 @@ export default function AdminModal({ onClose }: AdminModalProps) {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium truncate">{u.email}</p>
-                          <p className="text-xs text-muted-foreground">{u.name ?? '-'} · {u.organization ?? '-'} · {u.role === 'admin' ? '관리자' : '일반'}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {u.name ?? '-'} · {u.organization ?? '-'} · {u.role === 'admin' ? '관리자' : '일반'}
+                          </p>
+                        </div>
+                        {/* PTZ 허가 상태 뱃지 */}
+                        <div
+                          className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                            u.approved
+                              ? 'bg-green-500/15 text-green-500 border border-green-500/30'
+                              : 'bg-muted text-muted-foreground border border-border'
+                          }`}
+                          title={u.approved ? 'PTZ 허가됨' : 'PTZ 미허가'}
+                        >
+                          {u.approved
+                            ? <ShieldCheck className="w-3 h-3" />
+                            : <ShieldOff className="w-3 h-3" />}
+                          <span className="hidden sm:inline">{u.approved ? '허가' : '미허가'}</span>
                         </div>
                         <div className="flex gap-1.5">
+                          <button
+                            onClick={() => handleToggleApproved(u)}
+                            className={`p-1.5 rounded-md transition-colors text-xs ${
+                              u.approved
+                                ? 'hover:bg-destructive/10 text-green-500 hover:text-destructive'
+                                : 'hover:bg-green-500/10 text-muted-foreground hover:text-green-500'
+                            }`}
+                            title={u.approved ? '승인 취소' : 'PTZ 허가'}
+                          >
+                            {u.approved ? <ShieldOff className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+                          </button>
                           <button onClick={() => startEdit(u)}
                             className="p-1.5 hover:bg-muted rounded-md transition-colors text-muted-foreground hover:text-foreground">
                             <UserCog className="w-4 h-4" />

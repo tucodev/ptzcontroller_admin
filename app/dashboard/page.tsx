@@ -6,7 +6,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
     Camera, LogOut, Settings, Plus, Loader2,
-    Video, Wifi, WifiOff, Shield, AlertTriangle, ShieldCheck,
+    Video, Wifi, WifiOff, Shield, AlertTriangle, ShieldCheck, Lock,
 } from "lucide-react";
 import PTZControlPanel from "@/components/ptz-control-panel";
 import CameraList from "@/components/camera-list";
@@ -42,6 +42,14 @@ export default function DashboardPage() {
     // ── 라이선스 상태 (헤더 뱃지용) ───────────────────────────
     const [isLicensed, setIsLicensed]       = useState(false);
     const [licenseExpiry, setLicenseExpiry] = useState('');
+
+    // ── PTZ 기능 허가 여부 ────────────────────────────────────
+    // - 오프라인 모드: 유효한 라이선스 파일이 있어야 허가
+    // - 온라인 모드:  neon DB의 approved 필드(=true) 이거나 관리자 계정
+    const sessionUser = session?.user as { approved?: boolean; role?: string } | undefined;
+    const isApproved: boolean = isOfflineMode
+        ? isLicensed
+        : (sessionUser?.approved === true || sessionUser?.role === 'admin');
 
     // ─── Hex 로그 추가 (Circular buffer) ─────────────────────
     const addHexLog = useCallback(
@@ -103,6 +111,7 @@ export default function DashboardPage() {
 
     // ─── 카메라 연결 (Proxy 전용) ─────────────────────────────
     const handleConnect = async (camera: CameraConfig) => {
+        if (!isApproved) return; // 허가 없으면 연결 차단
         setConnectionStatus("connecting");
         try {
             const res  = await fetch("/api/ptz/connect", {
@@ -242,6 +251,7 @@ export default function DashboardPage() {
 
     // ─── PTZ 명령 전송 (WebSocket 직접 전송) ─────────────────
     const sendCommand = useCallback((command: PTZCommand) => {
+        if (!isApproved) return; // 허가 없으면 명령 차단
         if (!selectedCamera || !wsConnection || wsConnection.readyState !== WebSocket.OPEN) return;
 
         wsConnection.send(JSON.stringify({
@@ -252,7 +262,7 @@ export default function DashboardPage() {
                 protocol: selectedCamera.protocol ?? "pelcod",
             },
         }));
-    }, [selectedCamera, wsConnection]);
+    }, [isApproved, selectedCamera, wsConnection]);
 
     const handleSelectCamera = (camera: CameraConfig) => {
         if (selectedCamera?.id !== camera.id) handleDisconnect();
@@ -342,16 +352,34 @@ export default function DashboardPage() {
                     <div className="lg:col-span-1">
                         <motion.div
                             initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}
-                            className="bg-card/50 backdrop-blur rounded-xl border border-border p-4"
+                            className="relative bg-card/50 backdrop-blur rounded-xl border border-border p-4"
                         >
+                            {/* 허가 없음 오버레이 */}
+                            {!isApproved && (
+                                <div className="absolute inset-0 z-10 rounded-xl bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2">
+                                    <Lock className="w-8 h-8 text-amber-500" />
+                                    <p className="font-semibold text-amber-500 text-sm">PTZ 제어 제한됨</p>
+                                    <p className="text-xs text-muted-foreground text-center px-4">
+                                        {isOfflineMode
+                                            ? "유효한 오프라인 라이선스가 없습니다"
+                                            : "관리자 승인이 필요합니다 (설정 → 라이선스 발급 요청)"}
+                                    </p>
+                                </div>
+                            )}
                             <div className="flex items-center justify-between mb-4">
                                 <h2 className="text-lg font-semibold flex items-center gap-2">
                                     <Video className="w-5 h-5 text-primary" />
                                     Cameras
                                 </h2>
                                 <button
-                                    onClick={() => setShowAddModal(true)}
-                                    className="p-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg transition-colors"
+                                    onClick={() => isApproved && setShowAddModal(true)}
+                                    disabled={!isApproved}
+                                    className={`p-2 rounded-lg transition-colors ${
+                                        isApproved
+                                            ? "bg-primary hover:bg-primary/90 text-primary-foreground"
+                                            : "bg-muted text-muted-foreground cursor-not-allowed"
+                                    }`}
+                                    title={!isApproved ? "PTZ 제어 권한 없음" : "카메라 추가"}
                                 >
                                     <Plus className="w-4 h-4" />
                                 </button>
@@ -359,9 +387,9 @@ export default function DashboardPage() {
                             <CameraList
                                 cameras={cameras}
                                 selectedCamera={selectedCamera}
-                                onSelect={handleSelectCamera}
+                                onSelect={isApproved ? handleSelectCamera : () => {}}
                                 onRefresh={fetchCameras}
-                                onEdit={(camera) => { setEditCamera(camera); setShowAddModal(true); }}
+                                onEdit={isApproved ? (camera) => { setEditCamera(camera); setShowAddModal(true); } : undefined}
                             />
                         </motion.div>
                     </div>
@@ -370,8 +398,20 @@ export default function DashboardPage() {
                     <div className="lg:col-span-2">
                         <motion.div
                             initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
-                            className="bg-card/50 backdrop-blur rounded-xl border border-border p-6"
+                            className="relative bg-card/50 backdrop-blur rounded-xl border border-border p-6"
                         >
+                            {/* 허가 없음 오버레이 */}
+                            {!isApproved && (
+                                <div className="absolute inset-0 z-10 rounded-xl bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center gap-2">
+                                    <Lock className="w-12 h-12 text-amber-500" />
+                                    <p className="font-semibold text-amber-500">PTZ 제어 비활성화</p>
+                                    <p className="text-sm text-muted-foreground text-center max-w-xs">
+                                        {isOfflineMode
+                                            ? "유효한 오프라인 라이선스가 없어 카메라 제어를 사용할 수 없습니다."
+                                            : "라이선스 발급 요청 후 관리자 승인이 필요합니다. (우측 상단 ⚙ 설정)"}
+                                    </p>
+                                </div>
+                            )}
                             {selectedCamera ? (
                                 <>
                                     <div className="flex items-center justify-between mb-6">

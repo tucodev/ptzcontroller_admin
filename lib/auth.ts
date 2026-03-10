@@ -46,7 +46,7 @@ export const authOptions: NextAuthOptions = {
         try {
           console.log(`[Auth] Online login attempt (${modeLabel}):`, credentials.email);
           const user = await Promise.race([
-            prisma.user.findUnique({ 
+            prisma.user.findUnique({
               where: { email: credentials.email },
               select: {
                 id: true,
@@ -55,6 +55,7 @@ export const authOptions: NextAuthOptions = {
                 password: true,
                 role: true,
                 organization: true,
+                approved: true,
               }
             }),
             new Promise<null>((resolve) =>
@@ -90,6 +91,8 @@ export const authOptions: NextAuthOptions = {
                 email: user.email,
                 name: user.name,
                 role: user.role,
+                organization: user.organization ?? '',
+                approved: user.approved ?? false,
               };
             }
           }
@@ -121,12 +124,13 @@ export const authOptions: NextAuthOptions = {
             if (offlineUser) {
               console.log('[Auth] OK Desktop offline login success (license + local DB):', credentials.email);
               updateOfflineModeStatus(offlineUser.email, true);
-              
+
               return {
                 id: offlineUser.id,
                 email: offlineUser.email,
                 name: offlineUser.name,
                 role: offlineUser.role,
+                approved: true, // 유효한 라이선스로 인증 완료 → PTZ 기능 허가
               };
             } else {
               console.warn('[Auth] FAIL Desktop offline login: password mismatch');
@@ -151,15 +155,19 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.role = (user as { role?: string })?.role ?? 'user';
-        token.id = user?.id;
+        token.role         = (user as { role?: string })?.role ?? 'user';
+        token.id           = user?.id;
+        token.organization = (user as { organization?: string })?.organization ?? '';
+        token.approved     = (user as { approved?: boolean })?.approved ?? false;
       }
       return token;
     },
     async session({ session, token }) {
       if (session?.user) {
-        (session.user as { role?: string }).role = token?.role as string;
-        (session.user as { id?: string }).id = token?.id as string;
+        (session.user as { role?: string }).role             = token?.role as string;
+        (session.user as { id?: string }).id                 = token?.id as string;
+        (session.user as { organization?: string }).organization = (token?.organization as string) ?? '';
+        (session.user as { approved?: boolean }).approved    = (token?.approved as boolean) ?? false;
       }
       return session;
     },

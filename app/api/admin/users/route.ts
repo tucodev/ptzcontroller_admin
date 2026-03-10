@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import { requireAdmin, getSessionUser } from '@/lib/auth-utils';
 
 const USER_SELECT = {
-  id: true, email: true, name: true, organization: true, role: true, createdAt: true,
+  id: true, email: true, name: true, organization: true, role: true, approved: true, createdAt: true,
 } as const;
 
 export async function GET() {
@@ -72,17 +72,18 @@ export async function PATCH(request: NextRequest) {
   void session;
 
   try {
-    const { id, name, organization, role, password } = await request.json();
+    const { id, name, organization, role, password, approved } = await request.json();
 
     if (!id) {
       return NextResponse.json({ error: 'User ID required' }, { status: 400 });
     }
 
-    const updateData: Record<string, string> = {};
+    const updateData: Record<string, string | boolean> = {};
     if (name !== undefined)         updateData.name         = name;
     if (organization !== undefined) updateData.organization = organization;
     if (role !== undefined)         updateData.role         = role === 'admin' ? 'admin' : 'user';
     if (password)                   updateData.password     = await bcrypt.hash(password, 12);
+    if (approved !== undefined)     updateData.approved     = Boolean(approved);
 
     const user = await prisma.user.update({
       where: { id },

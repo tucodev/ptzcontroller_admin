@@ -76,6 +76,22 @@ export async function GET(request: NextRequest) {
             userId = "offline";
         }
 
+        // ✅ 경로 4: session/param에 name/org가 없으면 DB 조회 (온라인 환경)
+        if ((!userName || !userOrg) && userEmail !== "unknown@localhost") {
+            try {
+                const { prisma } = await import('@/lib/db');
+                const dbUser = await prisma.user.findUnique({
+                    where: { email: userEmail },
+                    select: { name: true, organization: true },
+                });
+                if (!userName && dbUser?.name)         userName = dbUser.name;
+                if (!userOrg  && dbUser?.organization) userOrg  = dbUser.organization;
+                console.log('[License] User info from DB:', { userName, userOrg });
+            } catch (dbErr) {
+                console.warn('[License] DB lookup failed (non-critical):', (dbErr as Error).message);
+            }
+        }
+
         // ──────────────────────────────────────────────────────────
         // 2단계: 머신ID 수집 (실패해도 계속)
         // ──────────────────────────────────────────────────────────

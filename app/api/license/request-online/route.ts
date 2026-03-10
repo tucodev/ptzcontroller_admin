@@ -46,20 +46,30 @@ export async function POST(request: NextRequest) {
     const userId    = user.id ?? user.email ?? 'unknown';
     const userEmail = user.email ?? '';
 
-    // 브라우저(→proxy)가 수집한 machineIds 우선 사용
-    // 없으면 서버 프로세스 HW ID (로컬 배포 / 폴백)
+    // 요청 바디 파싱 (machineIds, name, org 모두 선택적)
     let bodyMachineIds: string[] | null = null;
+    let bodyName: string | null = null;
+    let bodyOrg: string | null = null;
     try {
       const body = await request.json().catch(() => null);
       if (body?.machineIds && Array.isArray(body.machineIds) && body.machineIds.length > 0) {
         bodyMachineIds = body.machineIds as string[];
       }
+      // 사용자가 확인 다이얼로그에서 직접 입력한 name/org 우선 사용
+      if (typeof body?.name === 'string' && body.name.trim()) {
+        bodyName = body.name.trim();
+      }
+      if (typeof body?.org === 'string') {
+        bodyOrg = body.org.trim();
+      }
     } catch { /* JSON 파싱 실패는 무시 */ }
 
+    // 브라우저(→proxy)가 수집한 machineIds 우선 사용
+    // 없으면 서버 프로세스 HW ID (로컬 배포 / 폴백)
     const machineIds = bodyMachineIds ?? getAllMachineIds();
     const machineId  = machineIds[0] ?? 'UNKNOWN'; // 대표값 (하위 호환용)
 
-    // DB에서 이름/소속 조회
+    // DB에서 이름/소속 조회 (body에 없을 때 폴백)
     let userName = '';
     let userOrg  = '';
     try {
@@ -71,6 +81,10 @@ export async function POST(request: NextRequest) {
       userName = dbUser?.name         ?? '';
       userOrg  = dbUser?.organization ?? '';
     } catch { /* DB 조회 실패 시 빈값으로 진행 */ }
+
+    // 사용자가 직접 입력한 값이 있으면 우선 적용
+    if (bodyName !== null) userName = bodyName;
+    if (bodyOrg  !== null) userOrg  = bodyOrg;
 
     // 라이선스 서버로 발급 요청 전달
     const res  = await fetch(`${licenseServerUrl}/api/license/request`, {
