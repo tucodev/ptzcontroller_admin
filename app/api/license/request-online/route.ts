@@ -45,7 +45,18 @@ export async function POST(request: NextRequest) {
     const user      = session.user as { id?: string; email?: string };
     const userId    = user.id ?? user.email ?? 'unknown';
     const userEmail = user.email ?? '';
-    const machineIds = getAllMachineIds(); // 모든 내장 NIC ID (비활성화 포함)
+
+    // 브라우저(→proxy)가 수집한 machineIds 우선 사용
+    // 없으면 서버 프로세스 HW ID (로컬 배포 / 폴백)
+    let bodyMachineIds: string[] | null = null;
+    try {
+      const body = await request.json().catch(() => null);
+      if (body?.machineIds && Array.isArray(body.machineIds) && body.machineIds.length > 0) {
+        bodyMachineIds = body.machineIds as string[];
+      }
+    } catch { /* JSON 파싱 실패는 무시 */ }
+
+    const machineIds = bodyMachineIds ?? getAllMachineIds();
     const machineId  = machineIds[0] ?? 'UNKNOWN'; // 대표값 (하위 호환용)
 
     // DB에서 이름/소속 조회

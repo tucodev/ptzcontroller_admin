@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Settings, Loader2, Save, Moon, Sun, Monitor,
   ShieldCheck, ShieldAlert, ShieldOff, Clock, Send, RefreshCw,
-  Upload,
+  Upload, Download,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { AppSettings } from '@/lib/types';
@@ -122,7 +122,30 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const handleRequest = async () => {
     setLic(prev => ({ ...prev, status: 'requesting', message: '' }));
     try {
-      const res  = await fetch('/api/license/request-online', { method: 'POST' });
+      // 1) proxy에서 HW 정보 수집 시도 (proxy가 실행 중인 경우)
+      let proxyMachineIds: string[] | null = null;
+      try {
+        const hwRes = await fetch(
+          `http://localhost:${settings.proxyPort}/hw-info`,
+          { signal: AbortSignal.timeout(5_000) }
+        );
+        if (hwRes.ok) {
+          const hwData = await hwRes.json();
+          if (Array.isArray(hwData.machineIds) && hwData.machineIds.length > 0) {
+            proxyMachineIds = hwData.machineIds as string[];
+          }
+        }
+      } catch { /* proxy 미실행 또는 연결 불가 → 서버측 HW ID 폴백 */ }
+
+      // 2) 라이선스 요청 (proxy HW ID 있으면 body에 포함)
+      const reqBody = proxyMachineIds
+        ? JSON.stringify({ machineIds: proxyMachineIds })
+        : undefined;
+      const res  = await fetch('/api/license/request-online', {
+        method: 'POST',
+        headers: reqBody ? { 'Content-Type': 'application/json' } : {},
+        body: reqBody,
+      });
       const data = await res.json();
 
       if (!res.ok) {
@@ -211,6 +234,22 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     }
   };
 
+  // ── 항목3: 오프라인 .ptzreq 요청 파일 다운로드 ──────────────
+  // 인터넷 연결 없이 라이선스를 요청할 때 사용
+  // GET /api/license/request → 브라우저 다운로드 트리거
+  const handleDownloadRequest = () => {
+    try {
+      const a = document.createElement('a');
+      a.href = '/api/license/request';
+      a.download = 'ptzcontroller.ptzreq';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch {
+      alert('요청 파일 다운로드에 실패했습니다.');
+    }
+  };
+
   // ── 설정 조회 / 저장 ──────────────────────────────────────
   const fetchSettings = async () => {
     try {
@@ -276,7 +315,14 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
           </div>
         )}
 
-        {/* 파일 직접 등록 (항상 표시) */}
+        {/* 항목3: 라이선스 갱신/재발급용 요청 파일 다운로드 */}
+        <button onClick={handleDownloadRequest}
+          className="w-full py-2 bg-muted hover:bg-muted/80 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
+          <Download className="w-4 h-4" />
+          갱신 요청 파일 다운로드 (.ptzreq)
+        </button>
+
+        {/* 항목4: 파일 직접 등록 (항상 표시) */}
         <label className="w-full py-2 bg-muted hover:bg-muted/80 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer">
           {savingFile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
           라이선스 파일 직접 등록 (.ptzlic)
@@ -307,6 +353,20 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
           <Send className="w-4 h-4" />
           새로 요청하기
         </button>
+
+        {/* 항목3: 오프라인 재요청을 위한 .ptzreq 재다운로드 */}
+        <button onClick={handleDownloadRequest}
+          className="w-full py-2 bg-muted hover:bg-muted/80 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
+          <Download className="w-4 h-4" />
+          요청 파일 재다운로드 (.ptzreq)
+        </button>
+
+        {/* 항목4: 관리자가 수동 발급한 .ptzlic 직접 등록 */}
+        <label className="w-full py-2 bg-muted hover:bg-muted/80 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer">
+          <Upload className="w-4 h-4" />
+          라이선스 파일 직접 등록 (.ptzlic)
+          <input type="file" accept=".ptzlic" className="hidden" onChange={handleUpload} />
+        </label>
       </div>
     );
     
@@ -352,15 +412,38 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
           오프라인 환경을 대비해 미리 라이선스를 발급받으세요.
           요청 후 관리자 승인 시 자동으로 저장됩니다.
         </p>
+
+        {/* 온라인 요청 (인터넷 연결 시) */}
         <button onClick={handleRequest}
           className="w-full py-2.5 bg-blue-600 hover:bg-blue-600/90 text-white text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-2">
-          <Send className="w-4 h-4" />오프라인 라이선스 발급 요청
+          <Send className="w-4 h-4" />온라인 라이선스 발급 요청
         </button>
+
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-px bg-border" />
+          <span className="text-xs text-muted-foreground">또는 (인터넷 연결 없을 때)</span>
+          <div className="flex-1 h-px bg-border" />
+        </div>
+
+        {/* 항목3: 오프라인 요청 파일 다운로드 */}
+        <div className="space-y-1.5">
+          <button onClick={handleDownloadRequest}
+            className="w-full py-2 bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
+            <Download className="w-4 h-4" />
+            요청 파일 다운로드 (.ptzreq)
+          </button>
+          <p className="text-xs text-muted-foreground text-center leading-relaxed">
+            다운로드 후 관리자에게 전달 → 발급받은 .ptzlic 파일을 아래에 등록하세요
+          </p>
+        </div>
+
         <div className="flex items-center gap-2">
           <div className="flex-1 h-px bg-border" />
           <span className="text-xs text-muted-foreground">또는</span>
           <div className="flex-1 h-px bg-border" />
         </div>
+
+        {/* 항목4: .ptzlic 파일 직접 등록 */}
         <label className="w-full py-2 bg-muted hover:bg-muted/80 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer">
           <Upload className="w-4 h-4" />
           라이선스 파일 직접 등록 (.ptzlic)
