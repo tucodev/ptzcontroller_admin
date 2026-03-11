@@ -5,6 +5,8 @@ import path from 'path';
 
 // 업로드 파일 저장 경로: public/downloads/
 const DOWNLOADS_DIR = path.join(process.cwd(), 'public', 'downloads');
+// Cloud Download URL 설정 파일 (파일 목록에서 제외됨)
+const CONFIG_FILE = path.join(DOWNLOADS_DIR, 'proxy-config.json');
 
 // 허용 파일 확장자
 const ALLOWED_EXTS = new Set(['.exe', '.zip', '.sh', '.bat', '.msi', '.dmg', '.appimage']);
@@ -15,7 +17,21 @@ function ensureDownloadsDir() {
   }
 }
 
-// GET: 업로드된 proxy 파일 목록
+function readConfig(): { cloudDownloadUrl: string | null } {
+  if (!fs.existsSync(CONFIG_FILE)) return { cloudDownloadUrl: null };
+  try {
+    return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
+  } catch {
+    return { cloudDownloadUrl: null };
+  }
+}
+
+function writeConfig(data: { cloudDownloadUrl: string | null }) {
+  ensureDownloadsDir();
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2));
+}
+
+// GET: 업로드된 proxy 파일 목록 + cloudDownloadUrl
 //   - 로그인한 사용자 전체 조회 가능 (Proxy 다운로드 팝업에서 사용)
 //   - admin 이 아니어도 목록 확인은 허용 (오프라인 모드 포함)
 export async function GET() {
@@ -24,16 +40,19 @@ export async function GET() {
 
   try {
     ensureDownloadsDir();
-    const files = fs.readdirSync(DOWNLOADS_DIR).map((filename) => {
-      const stat = fs.statSync(path.join(DOWNLOADS_DIR, filename));
-      return {
-        filename,
-        size: stat.size,
-        uploadedAt: stat.mtime.toISOString(),
-        downloadUrl: `/downloads/${filename}`,
-      };
-    });
-    return NextResponse.json({ files });
+    const config = readConfig();
+    const files = fs.readdirSync(DOWNLOADS_DIR)
+      .filter((f) => f !== 'proxy-config.json') // config 파일은 목록에서 제외
+      .map((filename) => {
+        const stat = fs.statSync(path.join(DOWNLOADS_DIR, filename));
+        return {
+          filename,
+          size: stat.size,
+          uploadedAt: stat.mtime.toISOString(),
+          downloadUrl: `/downloads/${filename}`,
+        };
+      });
+    return NextResponse.json({ files, cloudDownloadUrl: config.cloudDownloadUrl ?? null });
   } catch (err) {
     console.error('List proxy files error:', err);
     return NextResponse.json({ error: 'Failed to list files' }, { status: 500 });
@@ -80,6 +99,25 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     console.error('Upload proxy file error:', err);
     return NextResponse.json({ error: 'Failed to upload file' }, { status: 500 });
+  }
+}
+
+// PATCH: Cloud Download URL 저장 (admin 전용)
+export async function PATCH(request: NextRequest) {
+  const { error } = await requireAdmin();
+  if (error) return error;
+
+  try {
+    const { cloudDownloadUrl } = await request.json();
+    if (cloudDownloadUrl !== undefined && cloudDownloadUrl !== null && typeof cloudDownloadUrl !== 'string') {
+      return NextResponse.json({ error: 'cloudDownloadUrl must be a string or null' }, { status: 400 });
+    }
+    const url = typeof cloudDownloadUrl === 'string' ? cloudDownloadUrl.trim() : null;
+    writeConfig({ cloudDownloadUrl: url || null });
+    return NextResponse.json({ success: true, cloudDownloadUrl: url || null });
+  } catch (err) {
+    console.error('Save cloud download URL error:', err);
+    return NextResponse.json({ error: 'Failed to save config' }, { status: 500 });
   }
 }
 

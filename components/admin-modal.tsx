@@ -6,6 +6,7 @@ import {
   X, Users, Upload, Trash2, Plus, Shield, ShieldOff,
   Loader2, Check, AlertCircle, Download, RefreshCw,
   Eye, EyeOff, KeyRound, UserCog, FileDown, ShieldCheck,
+  Cloud,
 } from 'lucide-react';
 
 interface AdminModalProps {
@@ -63,6 +64,11 @@ export default function AdminModal({ onClose }: AdminModalProps) {
   const [uploadProgress, setUploadProgress] = useState('');
   const [fileMsg, setFileMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Cloud Download URL
+  const [cloudDownloadUrl, setCloudDownloadUrl] = useState<string | null>(null);
+  const [cloudUrlInput, setCloudUrlInput] = useState('');
+  const [cloudUrlSaving, setCloudUrlSaving] = useState(false);
 
   // ── 초기 로드 ─────────────────────────────────
   useEffect(() => { fetchUsers(); }, []);
@@ -160,9 +166,31 @@ export default function AdminModal({ onClose }: AdminModalProps) {
     try {
       const res = await fetch('/api/admin/proxy-file');
       const data = await res.json();
-      if (res.ok) setProxyFiles(data.files ?? []);
+      if (res.ok) {
+        setProxyFiles(data.files ?? []);
+        setCloudDownloadUrl(data.cloudDownloadUrl ?? null);
+        setCloudUrlInput(data.cloudDownloadUrl ?? '');
+      }
     } finally {
       setFilesLoading(false);
+    }
+  }
+
+  async function saveCloudUrl() {
+    setCloudUrlSaving(true);
+    setFileMsg(null);
+    try {
+      const res = await fetch('/api/admin/proxy-file', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cloudDownloadUrl: cloudUrlInput.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setFileMsg({ type: 'err', text: data.error ?? 'Failed' }); return; }
+      setCloudDownloadUrl(data.cloudDownloadUrl ?? null);
+      setFileMsg({ type: 'ok', text: 'Cloud Download URL 저장됨.' });
+    } finally {
+      setCloudUrlSaving(false);
     }
   }
 
@@ -458,9 +486,43 @@ export default function AdminModal({ onClose }: AdminModalProps) {
                 <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg text-sm text-blue-400 space-y-1">
                   <p className="font-medium">📦 PTZ Proxy 배포 파일 관리</p>
                   <p className="text-xs text-blue-400/80">
-                    업로드한 파일은 proxy 연결 실패 시 팝업에서 다운로드 링크로 제공됩니다.<br />
+                    업로드한 파일은 proxy 연결 실패 시 팝업에서 &apos;실행 파일 다운로드&apos;로 제공됩니다.<br />
                     <span className="font-mono">.exe, .zip, .msi, .dmg, .sh, .bat, .appimage</span> 허용
                   </p>
+                </div>
+
+                {/* Cloud Download URL */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Cloud className="w-4 h-4 text-sky-400" />
+                    <h3 className="text-sm font-medium">Cloud Download URL</h3>
+                    {cloudDownloadUrl && (
+                      <span className="text-xs bg-sky-500/20 text-sky-400 px-2 py-0.5 rounded-full">설정됨</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    외부 다운로드 링크 (GitHub Releases, CDN 등). 설정 시 다운로드 팝업에 &apos;Cloud Download&apos; 버튼이 표시됩니다.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={cloudUrlInput}
+                      onChange={(e) => setCloudUrlInput(e.target.value)}
+                      placeholder="https://github.com/.../releases/latest"
+                      className="flex-1 px-3 py-2 bg-muted border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono"
+                    />
+                    <button
+                      onClick={saveCloudUrl}
+                      disabled={cloudUrlSaving}
+                      className="px-4 py-2 bg-sky-500/20 hover:bg-sky-500/30 text-sky-400 border border-sky-500/30 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {cloudUrlSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                      저장
+                    </button>
+                  </div>
+                  {cloudDownloadUrl && (
+                    <p className="text-xs text-sky-400/70 font-mono truncate">현재: {cloudDownloadUrl}</p>
+                  )}
                 </div>
 
                 {/* 업로드 영역 */}
@@ -529,15 +591,25 @@ export default function AdminModal({ onClose }: AdminModalProps) {
                   </div>
                 )}
 
-                {/* 현재 동작 설명 */}
-                {proxyFiles.length > 0 && (
-                  <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
-                    <p className="text-xs text-green-400 font-medium mb-1">✅ 현재 다운로드 팝업에 표시될 파일:</p>
+                {/* 현재 다운로드 팝업 상태 요약 */}
+                {(proxyFiles.length > 0 || cloudDownloadUrl) && (
+                  <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-lg space-y-1">
+                    <p className="text-xs text-green-400 font-medium">✅ 현재 다운로드 팝업에 표시될 항목:</p>
+                    {cloudDownloadUrl && (
+                      <p className="text-xs text-sky-400/80 font-mono">
+                        ☁️ Cloud Download → <span className="underline truncate">{cloudDownloadUrl}</span>
+                      </p>
+                    )}
                     {proxyFiles.map(f => (
                       <p key={f.filename} className="text-xs text-green-400/80 font-mono">
-                        • {f.filename} ({formatBytes(f.size)}) → <span className="underline">{f.downloadUrl}</span>
+                        📦 실행 파일 다운로드 → {f.filename} ({formatBytes(f.size)})
                       </p>
                     ))}
+                    {proxyFiles.length === 0 && (
+                      <p className="text-xs text-yellow-400/80 font-mono">
+                        💾 실행 파일 다운로드 → 소스 코드 ZIP (폴백)
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
