@@ -835,11 +835,22 @@ export default function LoginPage() {
                                 ? "Don't have an account? Sign up"
                                 : "Already have an account? Sign in"}
                         </button>
-                        <label className="block text-sm font-medium mb-2">
-                            <a href="https://www.tyche.pro" target="_blank">
-                                TYCHE Inc.
+                        <div className="mt-4 flex justify-center">
+                            <a href="https://www.tyche.pro" target="_blank" rel="noopener noreferrer">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                    src="/tyche-horz.svg"
+                                    alt="TYCHE Inc."
+                                    className="h-7 w-auto opacity-60 hover:opacity-90 transition-opacity dark:hidden"
+                                />
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                    src="/tyche-horz-dark.svg"
+                                    alt="TYCHE Inc."
+                                    className="h-7 w-auto opacity-60 hover:opacity-90 transition-opacity hidden dark:block"
+                                />
                             </a>
-                        </label>
+                        </div>
                     </div>
                 </div>
             </motion.div>

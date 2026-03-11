@@ -328,8 +328,11 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
       const res  = await fetch('/api/config/settings');
       const data = await res.json();
       if (data?.settings) {
-        setSettings(data.settings);
-        if (data.settings.theme) setTheme(data.settings.theme);
+        // 실제 적용 중인 테마(currentTheme)를 우선 사용한다.
+        // API가 반환하는 theme은 저장 시점에 따라 기본값 "dark"일 수 있으므로
+        // localStorage/next-themes가 관리하는 currentTheme이 항상 정확하다.
+        const activeTheme = (currentTheme as 'light'|'dark'|'system') || data.settings.theme;
+        setSettings({ ...data.settings, theme: activeTheme });
         // 설정 로드 후 proxy 상태 확인
         checkProxyStatus(data.settings.proxyPort);
       }
@@ -359,7 +362,22 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const updateSettings = (key: keyof AppSettings, value: string | number) =>
     setSettings(prev => ({ ...prev, [key]: value }));
 
-  const handleThemeChange = (t: 'light'|'dark'|'system') => { setTheme(t); updateSettings('theme', t); };
+  const handleThemeChange = (t: 'light'|'dark'|'system') => {
+    setTheme(t);
+    updateSettings('theme', t);
+    // 테마는 Save 버튼을 기다리지 않고 즉시 서버에 저장
+    // (dashboard 재진입 시 기본값 "dark"로 덮어씌워지는 것을 방지)
+    fetch('/api/config/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...settings, theme: t }),
+    }).catch(() => {});
+    // Desktop: Electron 설정(standalone/data/settings.json)에도 저장
+    // → 재시작 시 preload.js가 이 값을 읽어 localStorage에 주입함
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.saveSettings) {
+      (window as any).electronAPI.saveSettings({ theme: t });
+    }
+  };
 
   // ── 라이선스 섹션 UI ──────────────────────────────────────
   const renderLicenseSection = () => {

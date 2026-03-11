@@ -94,7 +94,7 @@ export function ProxyDownloadModal({ isOpen, onClose, proxyUrl }: ProxyDownloadM
             {proxyUrl && (
               <div className="mb-6 p-4 bg-muted/50 rounded-lg border border-border">
                 <p className="text-sm text-muted-foreground mb-1">연결 시도한 주소:</p>
-                <code className="text-sm font-mono text-foreground">{proxyUrl}</code>
+                <code className="text-sm font-mono text-foreground break-all">{proxyUrl}</code>
               </div>
             )}
 

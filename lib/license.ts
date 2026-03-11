@@ -178,7 +178,8 @@ function getWindowsMacsModern(): string[] {
 
   if (psOut && typeof psOut === 'string') {
     for (const line of psOut.split(/\r?\n/)) {
-      const mac = line.trim().toLowerCase();
+      // Get-NetAdapter returns XX-XX-XX-XX-XX-XX (dashes) → normalize to colons
+      const mac = line.trim().toLowerCase().replace(/-/g, ':');
       if (/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac) && mac !== '00:00:00:00:00:00') {
         macs.push(mac);
       }
@@ -230,7 +231,7 @@ function getWindowsMacs(): string[] {
 function getMacOsMacs(): string[] {
   const macs: string[] = [];
 
-  const out = safeSpawn('ifconfig', []);
+  const out = safeSpawn('ifconfig', ['-a']); // -a: 비활성 인터페이스 포함
   if (out && typeof out === 'string') {
     const matches = out.match(/ether\s+([0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2})/gi);
     if (matches) {
@@ -467,8 +468,13 @@ export function verifyLicense(licenseB64: string): VerifyResult {
     }
 
     // 4. 만료일 확인
-    if (new Date(payload.expiresAt) < new Date()) {
-      return { valid: false, reason: `라이선스가 만료됨 (${payload.expiresAt.slice(0, 10)})` };
+    // "YYYY-MM-DD" 형식(날짜만)이면 해당일 23:59:59 UTC까지 유효 (하루 종일 사용 가능)
+    const expiresAtStr = String(payload.expiresAt || '');
+    const expiryDate = /^\d{4}-\d{2}-\d{2}$/.test(expiresAtStr)
+      ? new Date(expiresAtStr + 'T23:59:59.999Z')
+      : new Date(expiresAtStr);
+    if (isNaN(expiryDate.getTime()) || expiryDate < new Date()) {
+      return { valid: false, reason: `라이선스가 만료됨 (${expiresAtStr.slice(0, 10)})` };
     }
 
     return {

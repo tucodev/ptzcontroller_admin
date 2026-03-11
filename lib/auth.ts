@@ -153,12 +153,29 @@ export const authOptions: NextAuthOptions = {
     maxAge: 24 * 60 * 60,
   },
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
+      // 최초 로그인: user 객체에서 토큰 필드 채우기
       if (user) {
         token.role         = (user as { role?: string })?.role ?? 'user';
         token.id           = user?.id;
         token.organization = (user as { organization?: string })?.organization ?? '';
         token.approved     = (user as { approved?: boolean })?.approved ?? false;
+      }
+      // 프로필 업데이트 후 update() 호출 시: DB에서 최신 정보 재조회
+      if (trigger === 'update' && token.id) {
+        try {
+          const fresh = await prisma.user.findUnique({
+            where: { id: token.id as string },
+            select: { name: true, organization: true, approved: true },
+          });
+          if (fresh) {
+            token.name         = fresh.name         ?? token.name;
+            token.organization = fresh.organization ?? '';
+            token.approved     = fresh.approved     ?? false;
+          }
+        } catch (e) {
+          console.warn('[auth] JWT trigger=update DB refresh failed:', e);
+        }
       }
       return token;
     },

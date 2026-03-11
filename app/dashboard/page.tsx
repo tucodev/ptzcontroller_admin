@@ -6,7 +6,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
     Camera, LogOut, Settings, Plus, Loader2,
-    Video, Wifi, WifiOff, Shield, AlertTriangle, ShieldCheck, Lock,
+    Video, Wifi, WifiOff, Shield, AlertTriangle, ShieldCheck, Lock, UserCog,
 } from "lucide-react";
 import PTZControlPanel from "@/components/ptz-control-panel";
 import CameraList from "@/components/camera-list";
@@ -14,6 +14,7 @@ import AddCameraModal from "@/components/add-camera-modal";
 import SettingsModal from "@/components/settings-modal";
 import { ProxyDownloadModal } from "@/components/proxy-download-modal";
 import AdminModal from "@/components/admin-modal";
+import ProfileModal from "@/components/profile-modal";
 import HexMonitor, { HexLogEntry } from "@/components/hex-monitor";
 import { CameraConfig, PTZCommand } from "@/lib/types";
 
@@ -28,6 +29,7 @@ export default function DashboardPage() {
     const [editCamera, setEditCamera]       = useState<CameraConfig | null>(null);
     const [showSettings, setShowSettings]   = useState(false);
     const [showAdmin, setShowAdmin]         = useState(false);
+    const [showProfile, setShowProfile]     = useState(false);
     const [showProxyDownload, setShowProxyDownload] = useState(false);
     const [failedProxyUrl, setFailedProxyUrl] = useState("");
     const [loading, setLoading]             = useState(true);
@@ -77,9 +79,16 @@ export default function DashboardPage() {
     // ─── 카메라 목록 조회 ─────────────────────────────────────
     const fetchCameras = useCallback(async () => {
         try {
-            const res  = await fetch("/api/config/cameras");
+            // cache: "no-store" → 브라우저/Next.js 캐시 무시, 항상 최신 데이터 요청
+            const res  = await fetch("/api/config/cameras", { cache: "no-store" });
             const data = await res.json();
-            setCameras(data?.cameras ?? []);
+            const freshCameras: CameraConfig[] = data?.cameras ?? [];
+            setCameras(freshCameras);
+            // 선택 중인 카메라를 최신 데이터로 동기화
+            // (편집 후 컨트롤 패널 헤더 및 연결 설정이 즉시 반영되도록)
+            setSelectedCamera(prev =>
+                prev ? (freshCameras.find(c => c.id === prev.id) ?? prev) : null
+            );
         } catch (err) {
             console.error("Failed to fetch cameras:", err);
         } finally {
@@ -306,6 +315,16 @@ export default function DashboardPage() {
                         <span className="text-muted-foreground text-sm hidden sm:block">
                             {isOfflineMode ? "오프라인 모드" : session?.user?.email}
                         </span>
+                        {/* 내 계정 — 온라인 로그인 사용자 전용 */}
+                        {!isOfflineMode && status === "authenticated" && (
+                            <button
+                                onClick={() => setShowProfile(true)}
+                                className="p-2 hover:bg-primary/20 text-primary rounded-lg transition-colors"
+                                title="내 계정 설정"
+                            >
+                                <UserCog className="w-5 h-5" />
+                            </button>
+                        )}
                         {!isOfflineMode && (session?.user as { role?: string })?.role === "admin" && (
                             <button
                                 onClick={() => setShowAdmin(true)}
@@ -484,6 +503,7 @@ export default function DashboardPage() {
             )}
             {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
             {showAdmin    && <AdminModal    onClose={() => setShowAdmin(false)} />}
+            {showProfile  && <ProfileModal  onClose={() => setShowProfile(false)} />}
 
             <ProxyDownloadModal
                 isOpen={showProxyDownload}

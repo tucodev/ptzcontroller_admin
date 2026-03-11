@@ -3,6 +3,9 @@ import { requireSession, getSessionUser } from '@/lib/auth-utils';
 import { getCamerasAsync, saveCameraAsync, deleteCameraAsync } from '@/lib/config-manager';
 import { CameraConfig } from '@/lib/types';
 
+// 세션 기반 동적 라우트 — Next.js 빌드 캐시 완전 비활성화
+export const dynamic = 'force-dynamic';
+
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 }
