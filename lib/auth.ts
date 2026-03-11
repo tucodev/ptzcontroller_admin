@@ -68,9 +68,10 @@ export const authOptions: NextAuthOptions = {
             if (isValid) {
               console.log(`[Auth] OK Online login success (${modeLabel}):`, credentials.email);
               
-              // Sync to offline DB
+              // Sync to offline DB (id를 Neon ID와 동일하게 유지해야 카메라 파일 경로가 일치)
               try {
                 await saveOfflineUser({
+                  id: user.id,
                   email: user.email,
                   name: user.name || 'User',
                   organization: user.organization || undefined,
@@ -93,6 +94,7 @@ export const authOptions: NextAuthOptions = {
                 role: user.role,
                 organization: user.organization ?? '',
                 approved: user.approved ?? false,
+                fromOfflineDb: false,
               };
             }
           }
@@ -131,6 +133,7 @@ export const authOptions: NextAuthOptions = {
                 name: offlineUser.name,
                 role: offlineUser.role,
                 approved: true, // 유효한 라이선스로 인증 완료 → PTZ 기능 허가
+                fromOfflineDb: true, // Neon 불가 → 로컬 SQLite 인증
               };
             } else {
               console.warn('[Auth] FAIL Desktop offline login: password mismatch');
@@ -156,10 +159,11 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user, trigger }) {
       // 최초 로그인: user 객체에서 토큰 필드 채우기
       if (user) {
-        token.role         = (user as { role?: string })?.role ?? 'user';
-        token.id           = user?.id;
-        token.organization = (user as { organization?: string })?.organization ?? '';
-        token.approved     = (user as { approved?: boolean })?.approved ?? false;
+        token.role          = (user as { role?: string })?.role ?? 'user';
+        token.id            = user?.id;
+        token.organization  = (user as { organization?: string })?.organization ?? '';
+        token.approved      = (user as { approved?: boolean })?.approved ?? false;
+        token.fromOfflineDb = (user as { fromOfflineDb?: boolean })?.fromOfflineDb ?? false;
       }
       // 프로필 업데이트 후 update() 호출 시: DB에서 최신 정보 재조회
       if (trigger === 'update' && token.id) {
@@ -181,10 +185,11 @@ export const authOptions: NextAuthOptions = {
     },
     async session({ session, token }) {
       if (session?.user) {
-        (session.user as { role?: string }).role             = token?.role as string;
-        (session.user as { id?: string }).id                 = token?.id as string;
-        (session.user as { organization?: string }).organization = (token?.organization as string) ?? '';
-        (session.user as { approved?: boolean }).approved    = (token?.approved as boolean) ?? false;
+        (session.user as { role?: string }).role                    = token?.role as string;
+        (session.user as { id?: string }).id                        = token?.id as string;
+        (session.user as { organization?: string }).organization    = (token?.organization as string) ?? '';
+        (session.user as { approved?: boolean }).approved           = (token?.approved as boolean) ?? false;
+        (session.user as { fromOfflineDb?: boolean }).fromOfflineDb = (token?.fromOfflineDb as boolean) ?? false;
       }
       return session;
     },

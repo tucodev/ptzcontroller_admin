@@ -151,6 +151,9 @@ export default function LoginPage() {
 
     const handleEnterOffline = () => {
         sessionStorage.setItem("offlineMode", "true");
+        // 서버 API가 읽을 수 있는 쿠키 설정:
+        // DB가 LAN 복귀로 다시 online이 돼도 requireSession()이 오프라인 세션을 유지하도록 함
+        document.cookie = "ptz-offline-mode=1; path=/; SameSite=Strict";
         console.log('[Login] Entering offline mode');
         router.replace("/dashboard");
     };

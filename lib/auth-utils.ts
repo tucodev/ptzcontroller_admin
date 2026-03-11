@@ -1,5 +1,6 @@
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { authOptions } from '@/lib/auth';
 import { isDbAvailable, createOfflineSession, OfflineSession } from '@/lib/offline-mode';
 
@@ -38,6 +39,14 @@ type AuthResult =
 export async function requireSession(): Promise<AuthResult> {
   const session = await getServerSession(authOptions);
   if (session) return { session, error: null };
+
+  // 의도적 오프라인 모드 쿠키 확인
+  // - 로그인 페이지에서 "오프라인으로 진행" 클릭 시 ptz-offline-mode=1 쿠키 설정됨
+  // - DB가 나중에 online 복귀해도 해당 세션은 오프라인 세션으로 유지 (LAN 복귀 시 401 방지)
+  const cookieStore = cookies();
+  if (cookieStore.get('ptz-offline-mode')?.value === '1') {
+    return { session: createOfflineSession(), error: null };
+  }
 
   // DB 오프라인이면 오프라인 세션 허용
   const dbOk = await isDbAvailable();

@@ -48,7 +48,7 @@ export default function DashboardPage() {
     // ── PTZ 기능 허가 여부 ────────────────────────────────────
     // - 오프라인 모드: 유효한 라이선스 파일이 있어야 허가
     // - 온라인 모드:  neon DB의 approved 필드(=true) 이거나 관리자 계정
-    const sessionUser = session?.user as { approved?: boolean; role?: string } | undefined;
+    const sessionUser = session?.user as { approved?: boolean; role?: string; fromOfflineDb?: boolean } | undefined;
     const isApproved: boolean = isOfflineMode
         ? isLicensed
         : (sessionUser?.approved === true || sessionUser?.role === 'admin');
@@ -345,6 +345,7 @@ export default function DashboardPage() {
                             onClick={async () => {
                                 if (isOfflineMode) {
                                     sessionStorage.removeItem("offlineMode");
+                                    document.cookie = "ptz-offline-mode=; path=/; max-age=0";
                                 } else {
                                     await signOut({ redirect: false });
                                 }
@@ -393,6 +394,15 @@ export default function DashboardPage() {
                                 <h2 className="text-lg font-semibold flex items-center gap-2">
                                     <Video className="w-5 h-5 text-primary" />
                                     Cameras
+                                    {(isOfflineMode || sessionUser?.fromOfflineDb) ? (
+                                        <span className="flex items-center gap-1 text-xs font-medium bg-amber-500/15 text-amber-500 px-2 py-0.5 rounded-full">
+                                            <WifiOff className="w-3 h-3" />Offline
+                                        </span>
+                                    ) : (
+                                        <span className="flex items-center gap-1 text-xs font-medium bg-green-500/15 text-green-500 px-2 py-0.5 rounded-full">
+                                            <Wifi className="w-3 h-3" />Online
+                                        </span>
+                                    )}
                                 </h2>
                                 <button
                                     onClick={() => isApproved && setShowAddModal(true)}

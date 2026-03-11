@@ -217,7 +217,20 @@ async function writeDbConfig(
 export async function getCamerasAsync(userId?: string): Promise<CameraConfig[]> {
   const uid = userId ?? 'shared';
   if (getStorageMode() === 'db' && uid !== 'offline') {
-    return readDbConfig<CameraConfig[]>(uid, 'cameras', []);
+    try {
+      const prisma = await getPrisma();
+      const row = await (prisma as any).userConfig.findUnique({
+        where: { userId_key: { userId: uid, key: 'cameras' } },
+      });
+      const cameras: CameraConfig[] = row?.value ? JSON.parse(row.value) : [];
+      // DB 성공 시 파일에도 동기화 → 오프라인 전환 시 fallback으로 사용
+      writeJsonFile(getFilePaths(uid).CAMERAS_FILE, cameras, uid, `${uid}:cameras`);
+      return cameras;
+    } catch {
+      // DB 접속 불가 → 파일 fallback
+      console.warn('[ConfigManager] DB unavailable, falling back to file (cameras)');
+      return readJsonFile<CameraConfig[]>(getFilePaths(uid).CAMERAS_FILE, [], uid, `${uid}:cameras`);
+    }
   }
   return readJsonFile<CameraConfig[]>(getFilePaths(uid).CAMERAS_FILE, [], uid, `${uid}:cameras`);
 }
@@ -261,7 +274,17 @@ export async function getPresetsAsync(cameraId?: string, userId?: string): Promi
   let presets: PresetConfig[];
 
   if (getStorageMode() === 'db' && uid !== 'offline') {
-    presets = await readDbConfig<PresetConfig[]>(uid, 'presets', []);
+    try {
+      const prisma = await getPrisma();
+      const row = await (prisma as any).userConfig.findUnique({
+        where: { userId_key: { userId: uid, key: 'presets' } },
+      });
+      presets = row?.value ? JSON.parse(row.value) : [];
+      writeJsonFile(getFilePaths(uid).PRESETS_FILE, presets, uid, `${uid}:presets`);
+    } catch {
+      console.warn('[ConfigManager] DB unavailable, falling back to file (presets)');
+      presets = readJsonFile<PresetConfig[]>(getFilePaths(uid).PRESETS_FILE, [], uid, `${uid}:presets`);
+    }
   } else {
     presets = readJsonFile<PresetConfig[]>(getFilePaths(uid).PRESETS_FILE, [], uid, `${uid}:presets`);
   }
@@ -303,7 +326,18 @@ export async function deletePresetAsync(id: string, userId?: string): Promise<bo
 export async function getSettingsAsync(userId?: string): Promise<AppSettings> {
   const uid = userId ?? 'shared';
   if (getStorageMode() === 'db' && uid !== 'offline') {
-    return readDbConfig<AppSettings>(uid, 'settings', DEFAULT_SETTINGS);
+    try {
+      const prisma = await getPrisma();
+      const row = await (prisma as any).userConfig.findUnique({
+        where: { userId_key: { userId: uid, key: 'settings' } },
+      });
+      const settings: AppSettings = row?.value ? JSON.parse(row.value) : DEFAULT_SETTINGS;
+      writeJsonFile(getFilePaths(uid).SETTINGS_FILE, settings, uid, `${uid}:settings`);
+      return settings;
+    } catch {
+      console.warn('[ConfigManager] DB unavailable, falling back to file (settings)');
+      return readJsonFile<AppSettings>(getFilePaths(uid).SETTINGS_FILE, DEFAULT_SETTINGS, uid, `${uid}:settings`);
+    }
   }
   return readJsonFile<AppSettings>(getFilePaths(uid).SETTINGS_FILE, DEFAULT_SETTINGS, uid, `${uid}:settings`);
 }
