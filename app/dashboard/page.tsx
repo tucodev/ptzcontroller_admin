@@ -196,6 +196,10 @@ export default function DashboardPage() {
                         case "pong":
                             // heartbeat 응답 — 로그 생략
                             break;
+                        case "welcome":
+                            // 프록시 서버 연결 확인 로그
+                            addHexLog("rx", `Proxy ${msg.version ?? ''}`.trim(), "welcome");
+                            break;
                         default:
                             if (msg.data) addHexLog("rx", msg.data, msg.type || "response");
                     }
