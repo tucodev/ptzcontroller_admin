@@ -24,13 +24,16 @@
 ## 빌드 최종 요약
 
 ### 1. 환경 변수 설정
+
 ```
 DATABASE_URL=...
 LICENSE_SECRET=...
 LICENSE_SERVER_URL=...
 NEXTAUTH_SECRET=...
 ```
+
 ### 2. 빌드 및 테스트
+
 ```
 cd ptzcontroller_admin
 npm install
@@ -38,16 +41,21 @@ npx prisma generate
 npm run build
 npm run dev
 ```
+
 ### 3. 라이선스 흐름 테스트
+
 ```
 # GET /api/license/verify → 라이선스 상태 확인
 # GET /api/license/request → .ptzreq 파일 생성
 # POST /api/license/verify → 라이선스 업로드
 ```
+
 ### 4. 오프라인 DB 테스트 (DB 연결 끊은 후)
+
 ```
 # 로그인 시도 → offline-db 인증
 ```
+
 ---
 
 ## 빌드 상세
@@ -145,6 +153,8 @@ module.exports = nextConfig;
 
 ```bash
 # 마이그레이션 실행
+yarn prisma migrate deploy    <==== 이것을 사용한다.!
+
 yarn prisma migrate dev --name init
 ```
 

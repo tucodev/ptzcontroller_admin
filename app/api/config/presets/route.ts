@@ -7,17 +7,24 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 }
 
-function resolveUserId(session: Awaited<ReturnType<typeof requireSession>>['session']): string {
-  if (!session) return 'offline';
-  const user = getSessionUser(session as { user?: unknown });
-  return user.id ?? 'offline';
+function resolveUserId(
+  session: Awaited<ReturnType<typeof requireSession>>['session'],
+  request: NextRequest,
+): string {
+  if (!session) {
+    const val = request.cookies.get('ptz-offline-userid')?.value;
+    if (val) return decodeURIComponent(val);
+    return 'offline';
+  }
+  const user = getSessionUser(session as { user?: unknown }) as { email?: string; id?: string };
+  return user.email ?? user.id ?? 'offline';
 }
 
 export async function GET(request: NextRequest) {
   const { session, error } = await requireSession();
   if (error) return error;
 
-  const userId = resolveUserId(session);
+  const userId = resolveUserId(session, request);
   try {
     const { searchParams } = new URL(request.url);
     const cameraId = searchParams.get('cameraId');
@@ -33,7 +40,7 @@ export async function POST(request: NextRequest) {
   const { session, error } = await requireSession();
   if (error) return error;
 
-  const userId = resolveUserId(session);
+  const userId = resolveUserId(session, request);
   try {
     const body = await request.json();
     const preset: PresetConfig = {
@@ -57,7 +64,7 @@ export async function DELETE(request: NextRequest) {
   const { session, error } = await requireSession();
   if (error) return error;
 
-  const userId = resolveUserId(session);
+  const userId = resolveUserId(session, request);
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');

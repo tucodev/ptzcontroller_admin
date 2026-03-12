@@ -15,7 +15,7 @@ export interface OfflineUserRecord {
   id: string;
   email: string;
   name: string;
-  passwordHash: string;
+  passwordHash: string;  // 빈 문자열('')이면 비밀번호 로그인 불가 (라이선스 전용 계정)
   role: 'user' | 'admin';
   createdAt: string;
   updatedAt: string;
@@ -96,7 +96,7 @@ export function initOfflineDb(): void {
         id TEXT PRIMARY KEY,
         email TEXT UNIQUE NOT NULL,
         name TEXT NOT NULL,
-        passwordHash TEXT NOT NULL,
+        passwordHash TEXT NOT NULL DEFAULT '',  -- 빈 문자열: 라이선스 전용 계정 (비밀번호 로그인 불가)
         role TEXT NOT NULL DEFAULT 'user',
         createdAt TEXT NOT NULL,
         updatedAt TEXT NOT NULL,
@@ -121,6 +121,17 @@ export function initOfflineDb(): void {
       CREATE INDEX IF NOT EXISTS idx_offline_users_email ON offline_users(email);
       CREATE INDEX IF NOT EXISTS idx_offline_users_machineId ON offline_users(machineId);
       CREATE INDEX IF NOT EXISTS idx_offline_users_isActive ON offline_users(isActive);
+
+      CREATE TABLE IF NOT EXISTS user_configs (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        UNIQUE(userId, key)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_user_configs_userId ON user_configs(userId);
     `);
     
     console.log('[OfflineDB] Initialized at:', dbPath);
@@ -196,15 +207,17 @@ export function getAllOfflineUsers(): OfflineUserRecord[] {
  * 사용자 저장/업데이트
  */
 export function saveOfflineUser(
-  user: Omit<OfflineUserRecord, 'createdAt' | 'updatedAt' | 'id'> & { 
+  user: Omit<OfflineUserRecord, 'createdAt' | 'updatedAt' | 'id' | 'passwordHash'> & {
     id?: string;
     createdAt?: string;
+    passwordHash?: string;  // 미제공 시 '' (라이선스 전용 계정)
   }
 ): OfflineUserRecord {
   const db = getDb();
   
   const id = user.id || generateId();
   const now = new Date().toISOString();
+  const passwordHash = user.passwordHash ?? '';  // 미제공 시 빈 문자열
   const existing = getOfflineUser(user.email);
     
   if (existing) {
@@ -238,7 +251,7 @@ export function saveOfflineUser(
     stmt.run(
       user.name,
       user.organization ?? null,
-      user.passwordHash,
+      passwordHash,
       user.role,
       user.machineId ?? null,
       user.lastMachineId ?? null,
@@ -278,7 +291,7 @@ export function saveOfflineUser(
       user.email,
       user.name,
       user.organization ?? null,
-      user.passwordHash,
+      passwordHash,
       user.role,
       user.machineId ?? null,
       user.lastMachineId ?? null,
@@ -320,7 +333,13 @@ export async function verifyOfflinePassword(
         console.warn('[OfflineDB] 사용자 없음:', email);
         return null;
     }
-    
+
+    // 라이선스 전용 계정 (passwordHash 없음) → 비밀번호 로그인 불가
+    if (!user.passwordHash) {
+        console.warn('[OfflineDB] 비밀번호 없는 라이선스 전용 계정:', email);
+        return null;
+    }
+
     // 계정 잠금 확인
     if (user.lockedUntil) {
         const lockTime = new Date(user.lockedUntil);
@@ -477,6 +496,68 @@ export function deactivateOfflineUser(email: string): void {
   `);
   
   stmt.run(new Date().toISOString(), email);
+}
+
+// ─── user_configs CRUD ────────────────────────────────────────
+
+/**
+ * 설정 조회 (userId = email)
+ */
+export function getOfflineConfig(userId: string, key: string): string | null {
+  const database = getDb();
+  const row = database.prepare(
+    'SELECT value FROM user_configs WHERE userId = ? AND key = ?'
+  ).get(userId, key) as { value: string } | undefined;
+  return row?.value ?? null;
+}
+
+/**
+ * 설정 저장/업데이트 (userId = email)
+ */
+export function saveOfflineConfig(userId: string, key: string, value: string): void {
+  const database = getDb();
+  const now = new Date().toISOString();
+  const id = `${userId}:${key}`;
+  database.prepare(`
+    INSERT INTO user_configs (id, userId, key, value, updatedAt)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(userId, key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt
+  `).run(id, userId, key, value, now);
+}
+
+/**
+ * 설정 삭제 (userId = email)
+ */
+export function deleteOfflineConfig(userId: string, key: string): void {
+  const database = getDb();
+  database.prepare('DELETE FROM user_configs WHERE userId = ? AND key = ?').run(userId, key);
+}
+
+// ─── 라이선스 기반 사용자 생성 ────────────────────────────────
+
+/**
+ * 라이선스에서 생성하는 오프라인 사용자.
+ * id = email, passwordHash = '' (비밀번호 로그인 불가 — 라이선스로만 오프라인 진입).
+ * 이미 존재하면 기존 id 반환.
+ */
+export function saveLicenseUser(params: {
+  email: string;
+  name?: string;
+  org?: string;
+}): string {
+  const existing = getOfflineUser(params.email);
+  if (existing) return existing.id;
+
+  saveOfflineUser({
+    id:           params.email,  // email을 id로 사용 (안정적 식별자)
+    email:        params.email,
+    name:         params.name || '',
+    organization: params.org,
+    passwordHash: '',            // 비밀번호 없는 라이선스 전용 계정
+    role:         'user',
+  });
+  console.log('[OfflineDB] License user created:', params.email);
+  return params.email;
 }
 
 /**

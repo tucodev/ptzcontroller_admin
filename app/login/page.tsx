@@ -149,11 +149,27 @@ export default function LoginPage() {
         }
     };
 
-    const handleEnterOffline = () => {
+    const handleEnterOffline = async () => {
         sessionStorage.setItem("offlineMode", "true");
         // 서버 API가 읽을 수 있는 쿠키 설정:
         // DB가 LAN 복귀로 다시 online이 돼도 requireSession()이 오프라인 세션을 유지하도록 함
         document.cookie = "ptz-offline-mode=1; path=/; SameSite=Strict";
+
+        // 라이선스에서 사용자 정보 추출 → SQLite 레코드 생성 → userId 쿠키 설정
+        try {
+            const res = await fetch('/api/offline/prepare', { method: 'POST' });
+            if (res.ok) {
+                const { userId } = await res.json() as { userId?: string };
+                if (userId && userId !== 'offline') {
+                    document.cookie =
+                        `ptz-offline-userid=${encodeURIComponent(userId)}; path=/; SameSite=Strict`;
+                    console.log('[Login] Offline user set:', userId);
+                }
+            }
+        } catch (e) {
+            console.warn('[Login] offline prepare failed, continuing as offline:', e);
+        }
+
         console.log('[Login] Entering offline mode');
         router.replace("/dashboard");
     };

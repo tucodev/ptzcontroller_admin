@@ -135,10 +135,14 @@ function getOsId(): string {
   return osId || `${platform}-${os.arch()}-${os.totalmem()}`;
 }
 
-function makeHwId(osId: string, hwKey: string): string {
+// 제품 고유 salt: OS에 종속되지 않고 코드 obfuscation 목적
+// OS UUID를 salt로 쓰지 않으므로 OS 재설치 후에도 동일 HW라면 동일 코드 생성
+const HW_SALT = 'PTZ-CTRL-HW-2024';
+
+function makeHwId(hwKey: string): string {
   return crypto
     .createHash('sha256')
-    .update([osId, hwKey].join('||'))
+    .update(`${HW_SALT}||${hwKey}`)
     .digest('hex')
     .slice(0, 16)
     .toUpperCase();
@@ -278,40 +282,63 @@ function getLinuxMacs(): string[] {
   return [...new Set(macs)];
 }
 
-// ── Windows HDD 시리얼 (Windows 7 보완) ────────────────────────────
+// ── Windows HDD Serial (물리 디스크) ────────────────────────────────
 function getWindowsHddSerials(): string[] {
   const serials: string[] = [];
-
-  try {
-    const out = safeSpawn('wmic', [
-      'logicaldisk',
-      'get',
-      'volumeserialnumber',
-      '/format:table',
-    ]);
-    
-    if (out && typeof out === 'string') {
-      const matches = out.match(/[0-9A-Fa-f]{8}/g);
-      if (matches) {
-        for (const match of matches) {
-          serials.push(match);
-        }
+  // wmic diskdrive: 물리 디스크 시리얼 (volume serial이 아닌 실제 HW 시리얼)
+  const out = safeSpawn('wmic', ['diskdrive', 'get', 'serialnumber', '/format:table']);
+  if (out) {
+    for (const line of out.split(/\r?\n/)) {
+      const serial = line.trim().replace(/\s+/g, '');
+      if (serial && serial !== 'SerialNumber' && serial.length > 2) {
+        serials.push(serial);
       }
     }
-  } catch (e) {
-    console.warn('[license] HDD 시리얼 수집 실패:', (e as Error).message);
   }
+  return [...new Set(serials)];
+}
 
+// ── macOS HDD Serial ─────────────────────────────────────────────────
+function getMacOsHddSerials(): string[] {
+  const serials: string[] = [];
+  // SPStorageDataType: SATA + NVMe 모두 커버
+  const out = safeSpawn('system_profiler', ['SPStorageDataType'], 8000);
+  if (out) {
+    const matches = out.match(/Serial Number:\s*(\S+)/g);
+    if (matches) {
+      for (const m of matches) {
+        const serial = m.replace(/Serial Number:\s*/, '').trim();
+        if (serial && serial.length > 2) serials.push(serial);
+      }
+    }
+  }
+  return [...new Set(serials)];
+}
+
+// ── Linux HDD Serial ─────────────────────────────────────────────────
+function getLinuxHddSerials(): string[] {
+  const serials: string[] = [];
+  try {
+    const blockDir = '/sys/block';
+    if (!fs.existsSync(blockDir)) return serials;
+    for (const dev of fs.readdirSync(blockDir)) {
+      // loop, ram, zram 장치 제외
+      if (dev.startsWith('loop') || dev.startsWith('ram') || dev.startsWith('zram')) continue;
+      const serial = safeReadFile(path.join(blockDir, dev, 'device', 'serial'));
+      if (serial && serial.length > 2) serials.push(serial.trim());
+    }
+  } catch (e) {
+    console.warn('[license] Linux HDD serial 수집 실패:', (e as Error).message);
+  }
   return [...new Set(serials)];
 }
 
 // ── 모든 MachineID 수집 (핵심) ──────────────────────────────────────
 export function getAllMachineIds(): string[] {
   const platform = os.platform();
-  const osId = getOsId();
   const ids: string[] = [];
 
-  // 1단계: NIC MAC 수집
+  // 1단계: NIC MAC 수집 (비활성 포함, 모든 플랫폼)
   let macs: string[] = [];
   if (platform === 'win32') {
     macs = getWindowsMacs();
@@ -320,29 +347,30 @@ export function getAllMachineIds(): string[] {
   } else {
     macs = getLinuxMacs();
   }
-
-  // 2단계: MAC → MachineID
   for (const mac of macs) {
-    ids.push(makeHwId(osId, mac));
+    ids.push(makeHwId(mac));
   }
 
-  // 3단계: Windows 7 보완 (NIC 부족 시 HDD 시리얼 추가)
-  if (platform === 'win32' && ids.length < 2) {
-    console.log('[license] NIC 부족 – HDD 시리얼로 보완');
-    const serials = getWindowsHddSerials();
-    for (const serial of serials) {
-      ids.push(makeHwId(osId, serial));
-    }
+  // 2단계: HDD Serial 수집 (모든 플랫폼, 항상)
+  let serials: string[] = [];
+  if (platform === 'win32') {
+    serials = getWindowsHddSerials();
+  } else if (platform === 'darwin') {
+    serials = getMacOsHddSerials();
+  } else {
+    serials = getLinuxHddSerials();
+  }
+  for (const serial of serials) {
+    ids.push(makeHwId(serial));
   }
 
-  console.log(`[license] getAllMachineIds: ${ids.length} IDs (${macs.length} NICs + ${
-    ids.length - macs.length
-  } HDDs) on ${platform}`);
+  console.log(`[license] getAllMachineIds: ${ids.length} IDs (${macs.length} NICs + ${serials.length} HDDs) on ${platform}`);
 
-  // 폴백
+  // 3단계: NIC + HDD 모두 없을 때만 OS UUID (최후 수단)
+  // OS 재설치 시 코드가 바뀌므로 가능하면 사용 안 함
   if (ids.length === 0) {
-    console.warn('[license] No hardware found – using OS UUID');
-    ids.push(makeHwId(osId, 'NO_HW_FALLBACK'));
+    console.warn('[license] No hardware found – OS UUID를 최후 수단으로 사용');
+    ids.push(makeHwId(getOsId()));
   }
 
   return ids;
@@ -352,6 +380,9 @@ export function getAllMachineIds(): string[] {
 export interface LicensePayload {
   machineId: string;
   machineIds: string[];
+  userEmail?: string;  // 라이선스 발급 대상 이메일 (서명 포함)
+  userName?:  string;  // 발급 대상 이름 (서명 포함)
+  userOrg?:   string;  // 발급 대상 소속 (변경 가능 메타데이터 — 서명 제외)
   issuedAt: string;
   expiresAt: string;
   product: string;
@@ -375,6 +406,9 @@ export interface VerifyResult {
   expiresAt?: string;
   machineId?: string;
   matchedIds?: string[];
+  userEmail?: string;  // 라이선스 발급 대상 이메일 (신규 라이선스만 포함)
+  userName?:  string;
+  userOrg?:   string;
 }
 
 // ── 라이선스 파일 경로 ────────────────────────────────────────────────
@@ -439,12 +473,14 @@ export function verifyLicense(licenseB64: string): VerifyResult {
   try {
     const raw = Buffer.from(licenseB64, 'base64').toString('utf8');
     const lic = JSON.parse(raw) as LicenseFile;
-    const { sig, ...payload } = lic;
+    // userOrg는 서명 외 메타데이터 → sig와 함께 분리 후 나머지만 검증
+    const { sig, userOrg, ...signedPayload } = lic;
+    const payload = signedPayload as LicensePayload;
 
     // 1. HMAC 서명 검증
     const expected = crypto
       .createHmac('sha256', MASTER_SECRET)
-      .update(JSON.stringify(payload))
+      .update(JSON.stringify(signedPayload))
       .digest('hex');
     if (sig !== expected) {
       return { valid: false, reason: '라이선스 서명이 올바르지 않습니다' };
@@ -478,10 +514,13 @@ export function verifyLicense(licenseB64: string): VerifyResult {
     }
 
     return {
-      valid: true,
-      expiresAt: payload.expiresAt,
-      machineId: matchedIds[0],
+      valid:      true,
+      expiresAt:  payload.expiresAt,
+      machineId:  matchedIds[0],
       matchedIds,
+      userEmail:  payload.userEmail,
+      userName:   payload.userName,
+      userOrg:    userOrg,   // 서명 외 메타데이터에서 읽음
     };
   } catch (e) {
     console.error('[license] verifyLicense error:', (e as Error).message);

@@ -3,12 +3,17 @@ import { requireSession, getSessionUser } from '@/lib/auth-utils';
 import { getCamerasAsync } from '@/lib/config-manager';
 import { createProxyToken } from '@/lib/proxy-token';
 
-function resolveUserId(session: Awaited<ReturnType<typeof requireSession>>['session']): string {
-  if (!session) return 'offline';
-  const user = getSessionUser(session as { user?: unknown });
-  const id = user.id;
-  if (!id || typeof id !== 'string' || id.trim() === '') return 'offline';
-  return id;
+function resolveUserId(
+  session: Awaited<ReturnType<typeof requireSession>>['session'],
+  request: NextRequest,
+): string {
+  if (!session) {
+    const val = request.cookies.get('ptz-offline-userid')?.value;
+    if (val) return decodeURIComponent(val);
+    return 'offline';
+  }
+  const user = getSessionUser(session as { user?: unknown }) as { email?: string; id?: string };
+  return user.email ?? user.id ?? 'offline';
 }
 
 export async function POST(request: NextRequest) {
@@ -22,7 +27,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Camera ID is required' }, { status: 400 });
     }
 
-    const userId  = resolveUserId(session);
+    const userId  = resolveUserId(session, request);
     const cameras = await getCamerasAsync(userId);
     const camera  = cameras.find((c) => c.id === cameraId);
 

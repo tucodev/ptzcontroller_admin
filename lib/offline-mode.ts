@@ -69,7 +69,14 @@ export function resetDbCache(): void {
  * Verify offline license file
  * Returns: { valid: true, expiresAt: "..." } or { valid: false, reason: "..." }
  */
-export async function verifyOfflineLicense(): Promise<{ valid: boolean; expiresAt?: string; reason?: string }> {
+export async function verifyOfflineLicense(): Promise<{
+  valid:      boolean;
+  expiresAt?: string;
+  reason?:    string;
+  userEmail?: string;
+  userName?:  string;
+  userOrg?:   string;
+}> {
   try {
     const licenseDir = getLicenseDir();
     const licenseFile = path.join(licenseDir, 'offline.ptzlic');
@@ -113,7 +120,15 @@ export async function verifyOfflineLicense(): Promise<{ valid: boolean; expiresA
       }
     }
     
-    return result;
+    // result에 userEmail/userName/userOrg 이미 포함 (license.ts verifyLicense 반환값)
+    return {
+      valid:      result.valid,
+      expiresAt:  result.expiresAt,
+      reason:     result.reason,
+      userEmail:  result.userEmail,
+      userName:   result.userName,
+      userOrg:    result.userOrg,
+    };
   } catch (err) {
     console.error('[OfflineMode] License verification error:', err);
     return { valid: false, reason: 'ERROR' };
@@ -122,21 +137,26 @@ export async function verifyOfflineLicense(): Promise<{ valid: boolean; expiresA
 
 /**
  * Create offline session with license verification
+ * @param userEmail - 쿠키에서 읽은 이메일 (ptz-offline-userid). 없으면 라이선스에서 추출.
  */
-export async function createOfflineSession(): Promise<OfflineSession> {
+export async function createOfflineSession(userEmail?: string): Promise<OfflineSession> {
   const licenseStatus = await verifyOfflineLicense();
-  
+
+  // 실제 사용자 이메일 우선순위: 파라미터(쿠키) > 라이선스 파일 > fallback
+  const email = userEmail ?? licenseStatus.userEmail ?? 'offline@local';
+  const name  = licenseStatus.userName ?? 'Offline User';
+
   if (!licenseStatus.valid) {
     console.warn('[OfflineMode] Offline mode without valid license, reason:', licenseStatus.reason);
   } else {
-    console.log('[OfflineMode] Offline mode with valid license:', licenseStatus.expiresAt);
+    console.log('[OfflineMode] Offline mode with valid license:', licenseStatus.expiresAt, '/ user:', email);
   }
-  
+
   return {
     user: {
-      id:    'offline',
-      name:  'Offline User',
-      email: 'offline@local',
+      id:    email,
+      name,
+      email,
       role:  'user',
     },
     offline: true,

@@ -11,25 +11,30 @@ function generateId(): string {
 }
 
 /**
- * 세션에서 userId 추출.
- * JWT 세션이면 token.id (DB User.id), 오프라인이면 'offline'.
- * id가 없으면 'shared' 대신 'offline' 으로 폴백하여
- * data/ 바로 아래가 아닌 data/users/offline/ 에 저장되도록 한다.
+ * 세션에서 userId 추출 (= email).
+ * 모든 저장소(Neon, SQLite, 파일)를 email 기준으로 통일.
+ * - 온라인 세션: session.user.email
+ * - 오프라인 계속 진행: ptz-offline-userid 쿠키 (= email)
+ * - 쿠키도 없으면: 'offline' 폴백
  */
-function resolveUserId(session: Awaited<ReturnType<typeof requireSession>>['session']): string {
-  if (!session) return 'offline';
-  const user = getSessionUser(session as { user?: unknown });
-  // user.id 가 undefined/null/빈문자 이면 'offline' 으로 폴백
-  const id = user.id;
-  if (!id || typeof id !== 'string' || id.trim() === '') return 'offline';
-  return id;
+function resolveUserId(
+  session: Awaited<ReturnType<typeof requireSession>>['session'],
+  request: NextRequest,
+): string {
+  if (!session) {
+    const val = request.cookies.get('ptz-offline-userid')?.value;
+    if (val) return decodeURIComponent(val);
+    return 'offline';
+  }
+  const user = getSessionUser(session as { user?: unknown }) as { email?: string; id?: string };
+  return user.email ?? user.id ?? 'offline';
 }
 
 export async function GET(request: NextRequest) {
   const { session, error } = await requireSession();
   if (error) return error;
 
-  const userId = resolveUserId(session);
+  const userId = resolveUserId(session, request);
   try {
     const cameras = await getCamerasAsync(userId);
     return NextResponse.json({ cameras });
@@ -48,7 +53,7 @@ export async function POST(request: NextRequest) {
   const { session, error } = await requireSession();
   if (error) return error;
 
-  const userId = resolveUserId(session);
+  const userId = resolveUserId(session, request);
   try {
     const body = await request.json();
     const camera: CameraConfig = {
@@ -84,7 +89,7 @@ export async function PUT(request: NextRequest) {
   const { session, error } = await requireSession();
   if (error) return error;
 
-  const userId = resolveUserId(session);
+  const userId = resolveUserId(session, request);
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
@@ -125,7 +130,7 @@ export async function DELETE(request: NextRequest) {
   const { session, error } = await requireSession();
   if (error) return error;
 
-  const userId = resolveUserId(session);
+  const userId = resolveUserId(session, request);
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');

@@ -85,7 +85,7 @@ PTZ Controller는 PelcoD, ONVIF, ujin 등 다양한 프로토콜을 지원하는
 `yarn prisma db seed` 실행 시 자동 생성되는 테스트 계정:
 
 - Email: `john@doe.com`
-- Password: `johndoe123`
+- Password: `hellotyche!`
 
 > ⚠️ 운영 환경에서는 이 계정의 비밀번호를 변경하거나 관리자 페이지에서 삭제하세요.
 
@@ -154,9 +154,9 @@ PTZ Controller는 PelcoD, ONVIF, ujin 등 다양한 프로토콜을 지원하는
 | 필드                | 설명                | 예시                |
 | ------------------- | ------------------- | ------------------- |
 | Proxy WebSocket URL | ptz-proxy 서버 주소 | ws://localhost:9902 |
-| Username | ONVIF 사용자명 | admin |
-| Password | ONVIF 비밀번호 | — |
-| Profile Token | ONVIF 프로파일 토큰 | 비워두면 자동 조회 |
+| Username            | ONVIF 사용자명      | admin               |
+| Password            | ONVIF 비밀번호      | —                   |
+| Profile Token       | ONVIF 프로파일 토큰 | 비워두면 자동 조회  |
 
 > **ONVIF Profile Token**: 비워두면 연결 시 카메라에서 자동으로 조회하여 적용합니다.
 

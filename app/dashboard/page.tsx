@@ -47,11 +47,14 @@ export default function DashboardPage() {
 
     // ── PTZ 기능 허가 여부 ────────────────────────────────────
     // - 오프라인 모드: 유효한 라이선스 파일이 있어야 허가
-    // - 온라인 모드:  neon DB의 approved 필드(=true) 이거나 관리자 계정
+    // - 온라인 모드:  다음 중 하나라도 해당하면 허가
+    //     1) neon DB의 approved = true
+    //     2) 관리자 계정 (role === 'admin')
+    //     3) 유효한 로컬 라이선스 보유 (오프라인→온라인 전환 시 라이선스로 인증)
     const sessionUser = session?.user as { approved?: boolean; role?: string; fromOfflineDb?: boolean } | undefined;
     const isApproved: boolean = isOfflineMode
         ? isLicensed
-        : (sessionUser?.approved === true || sessionUser?.role === 'admin');
+        : (sessionUser?.approved === true || sessionUser?.role === 'admin' || isLicensed);
 
     // ─── Hex 로그 추가 (Circular buffer) ─────────────────────
     const addHexLog = useCallback(

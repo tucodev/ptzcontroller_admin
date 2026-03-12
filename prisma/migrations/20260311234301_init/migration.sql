@@ -35,4 +35,4 @@ CREATE INDEX "UserConfig_userId_idx" ON "UserConfig"("userId");
 CREATE UNIQUE INDEX "UserConfig_userId_key_key" ON "UserConfig"("userId", "key");
 
 -- AddForeignKey
-ALTER TABLE "UserConfig" ADD CONSTRAINT "UserConfig_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "UserConfig" ADD CONSTRAINT "UserConfig_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("email") ON DELETE CASCADE ON UPDATE CASCADE;
