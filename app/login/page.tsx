@@ -165,6 +165,18 @@ export default function LoginPage() {
                         `ptz-offline-userid=${encodeURIComponent(userId)}; path=/; SameSite=Strict`;
                     console.log('[Login] Offline user set:', userId);
                 }
+            } else {
+                // 403 = invalid_license: 쿠키 롤백 + 에러 표시 (오프라인 진입 차단)
+                const data = await res.json().catch(() => ({})) as { error?: string; reason?: string };
+                if (res.status === 403 && data.error === 'invalid_license') {
+                    console.warn('[Login] License invalid during prepare — aborting offline entry');
+                    sessionStorage.removeItem("offlineMode");
+                    document.cookie = "ptz-offline-mode=; path=/; max-age=0";
+                    setLicenseError(data.reason ?? '라이선스가 유효하지 않습니다. 다시 발급받으세요.');
+                    setOfflineStep("invalid");
+                    return; // 대시보드 이동 중단
+                }
+                console.warn('[Login] offline prepare failed with status:', res.status);
             }
         } catch (e) {
             console.warn('[Login] offline prepare failed, continuing as offline:', e);
