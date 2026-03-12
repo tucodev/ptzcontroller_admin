@@ -36,6 +36,8 @@ export default function DashboardPage() {
     const [wsConnection, setWsConnection]   = useState<WebSocket | null>(null);
     const [hexLogs, setHexLogs]             = useState<HexLogEntry[]>([]);
     const logIdCounter = useRef(0);
+    const hexLogBuffer = useRef<HexLogEntry[]>([]);
+    const hexLogFlushScheduled = useRef(false);
     const MAX_HEX_LOGS = 500; // Circular buffer 최대 크기
 
     // ── 카메라 위치 정보 (Ujin F0h / PelcoD 축별 Return) ──
@@ -65,7 +67,8 @@ export default function DashboardPage() {
         ? isLicensed
         : (sessionUser?.approved === true || sessionUser?.role === 'admin' || isLicensed);
 
-    // ─── Hex 로그 추가 (Circular buffer) ─────────────────────
+    // ─── Hex 로그 추가 (Batched Circular buffer) ─────────────
+    // 여러 로그를 모아 한 번의 setState로 처리하여 리렌더링 최소화
     const addHexLog = useCallback(
         (type: "tx" | "rx", data: number[] | string, description?: string) => {
             const entry: HexLogEntry = {
@@ -75,15 +78,23 @@ export default function DashboardPage() {
                 data,
                 description,
             };
-            setHexLogs((prev) => {
-                if (prev.length >= MAX_HEX_LOGS) {
-                    const next = new Array(MAX_HEX_LOGS);
-                    for (let i = 0; i < MAX_HEX_LOGS - 1; i++) next[i] = prev[i + 1];
-                    next[MAX_HEX_LOGS - 1] = entry;
-                    return next;
-                }
-                return [...prev, entry];
-            });
+            hexLogBuffer.current.push(entry);
+
+            if (!hexLogFlushScheduled.current) {
+                hexLogFlushScheduled.current = true;
+                requestAnimationFrame(() => {
+                    const batch = hexLogBuffer.current;
+                    hexLogBuffer.current = [];
+                    hexLogFlushScheduled.current = false;
+                    if (batch.length === 0) return;
+                    setHexLogs((prev) => {
+                        const merged = prev.concat(batch);
+                        return merged.length > MAX_HEX_LOGS
+                            ? merged.slice(merged.length - MAX_HEX_LOGS)
+                            : merged;
+                    });
+                });
+            }
         },
         [],
     );
@@ -289,6 +300,7 @@ export default function DashboardPage() {
 
         const proto = (selectedCamera.protocol || 'pelcod').toLowerCase();
         const intervalMs = Math.max(100, autoQueryInterval);
+        const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
 
         const timer = setInterval(() => {
             if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) return;
@@ -306,7 +318,7 @@ export default function DashboardPage() {
             } else {
                 // PelcoD: 4축 순차 조회 (각 100ms 간격)
                 (['pan', 'tilt', 'zoom', 'focus'] as const).forEach((axis, i) => {
-                    setTimeout(() => {
+                    const t = setTimeout(() => {
                         if (wsConnection.readyState === WebSocket.OPEN) {
                             wsConnection.send(JSON.stringify({
                                 type: "command",
@@ -319,11 +331,15 @@ export default function DashboardPage() {
                             }));
                         }
                     }, i * 100);
+                    pendingTimeouts.push(t);
                 });
             }
         }, intervalMs);
 
-        return () => clearInterval(timer);
+        return () => {
+            clearInterval(timer);
+            pendingTimeouts.forEach(t => clearTimeout(t));
+        };
     }, [autoQueryEnabled, autoQueryInterval, connectionStatus, wsConnection, selectedCamera]);
 
     // ─── PTZ 명령 전송 (WebSocket 직접 전송) ─────────────────
