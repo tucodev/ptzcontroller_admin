@@ -14,7 +14,7 @@
 
 ## 개요
 
-PTZ Proxy는 브라우저(또는 Electron 앱)가 Private 네트워크의 PTZ 카메라를 제어할 수 있도록  
+PTZ Proxy는 브라우저(또는 Electron 앱)가 Private 네트워크의 PTZ 카메라를 제어할 수 있도록
 WebSocket ↔ TCP를 중계하는 서비스입니다.
 
 ### 사용 시나리오
@@ -29,6 +29,9 @@ WebSocket ↔ TCP를 중계하는 서비스입니다.
 |------|------|------|
 | **ptz-proxy-electron** | GUI + 시스템 트레이 앱 (Windows EXE) | ✅ 권장 |
 | **ptz-proxy 소스** | Node.js CLI 방식, ZIP 다운로드 | 고급 사용자 |
+
+> **참고**: Desktop 버전(`ptzcontroller_desktop`)은 ptz-proxy를 내장하고 있지 않습니다.
+> Desktop도 Admin과 동일하게 외부 ptz-proxy-electron을 실행해야 Proxy 모드를 사용할 수 있습니다.
 
 ---
 
@@ -57,15 +60,16 @@ WebSocket ↔ TCP를 중계하는 서비스입니다.
                               │   │  PTZ Camera  │       │
                               │   │ 192.168.x.x  │       │
                               │   └──────────────┘       │
-                              └─────────────────────────-┘
+                              └──────────────────────────┘
 ```
 
 ### 통신 흐름
 
 1. 브라우저가 PTZ Proxy에 WebSocket 연결 (`ws://[PC IP]:9902`)
 2. 웹앱에서 PTZ 명령 전송 (JSON)
-3. Proxy가 명령을 PelcoD 패킷으로 변환
+3. Proxy가 명령을 PelcoD/Ujin 패킷으로 변환
 4. TCP 소켓으로 카메라에 전송
+5. 카메라 응답을 다시 WebSocket으로 브라우저에 전달
 
 ---
 
@@ -83,7 +87,7 @@ WebSocket ↔ TCP를 중계하는 서비스입니다.
 
 ### 다운로드
 
-**방법 1**: 웹앱에서 Proxy 연결 실패 시 자동으로 팝업 표시 → 다운로드 링크 클릭  
+**방법 1**: 웹앱에서 Proxy 연결 실패 시 자동으로 팝업 표시 → 다운로드 링크 클릭
 **방법 2**: 관리자가 업로드한 파일 직접 다운로드 (관리자 Proxy 파일 탭 참조)
 
 ### 빌드 방법 (소스에서 직접)
@@ -98,12 +102,6 @@ ptz-proxy-electron/
 │   ├── icon.ico     ← 아이콘 (필수, 256×256 이상)
 │   └── icon.png
 └── package.json     ← electron-builder 설정
-```
-
-**아이콘 준비** (필수):
-```
-assets/ 폴더에 icon.ico, icon.png 파일을 배치
-크기: 256×256 이상
 ```
 
 **Windows EXE 빌드**:
@@ -135,8 +133,8 @@ npm run build        # electron-builder --win --x64
 
 ### 시작 시 트레이 모드
 
-앱의 **"시작 시 트레이로 실행"** 토글을 ON 하면,  
-다음 실행부터 창 없이 트레이 아이콘만 표시됩니다.  
+앱의 **"시작 시 트레이로 실행"** 토글을 ON 하면,
+다음 실행부터 창 없이 트레이 아이콘만 표시됩니다.
 설정은 자동 저장되며, 트레이 아이콘 클릭으로 창을 열 수 있습니다.
 
 설정 파일 위치: `%AppData%\ptz-proxy\config.json`
@@ -162,9 +160,7 @@ npm run build        # electron-builder --win --x64
 ### 실행 방법
 
 ```bash
-# 압축 해제 후
 cd ptz-proxy-standalone
-
 npm install
 
 # Windows
@@ -179,25 +175,6 @@ node ptz-proxy.js 8765
 ```
 
 기본 포트: **9902**
-
-### EXE로 빌드 (pkg 사용)
-
-```bat
-build-exe.bat
-```
-
-또는 수동:
-
-```bash
-npm install
-npm install -g pkg
-
-# Windows EXE
-npx pkg ptz-proxy.js --targets node18-win-x64 --output dist/ptz-proxy.exe
-
-# Linux
-npx pkg ptz-proxy.js --targets node18-linux-x64 --output dist/ptz-proxy-linux
-```
 
 ---
 
@@ -228,8 +205,6 @@ ptz-proxy-electron은 ONVIF 프로토콜을 지원하며, 다양한 제조사의
 
 ### 인증 방식 자동 협상
 
-카메라 제조사마다 요구하는 인증 방식이 다릅니다. ptz-proxy는 아래 순서로 자동 시도합니다:
-
 | 시도 순서 | 인증 방식 | 대상 카메라 |
 |-----------|-----------|-------------|
 | 1차 | 인증 없음 (plain SOAP) | 인증 불필요 카메라 |
@@ -238,42 +213,16 @@ ptz-proxy-electron은 ONVIF 프로토콜을 지원하며, 다양한 제조사의
 | 4차 | WS-Security PasswordDigest | Axis, Bosch, Sony 등 표준 ONVIF |
 | 5차 | WS-Security + Basic Auth | 일부 하이브리드 카메라 |
 
-별도 설정 없이 자동으로 올바른 방식이 선택됩니다.
-
 ### Profile Token 자동 조회
 
-카메라에 Profile Token을 설정하지 않아도 연결 시 자동으로 조회합니다:
-
-1. 연결 즉시 PTZ 제어 가능 (조회 완료 대기 없음)
-2. 백그라운드에서 `GetCapabilities` → `GetProfiles` 순서로 조회
-3. 조회된 첫 번째 토큰이 자동 적용됨
-4. 조회 결과는 5분간 캐시됨
-
+카메라에 Profile Token을 설정하지 않아도 연결 시 자동으로 조회합니다.
 수동으로 Profile Token을 지정하면 자동 조회를 건너뜁니다.
-
-### 삼성/한화비전 iPolis 카메라 특이사항
-
-- HTTP Digest Auth 필수 (`realm="iPolis"`)
-- WS-Security 헤더가 있으면 SOAP Fault로 거부함
-- Profile Token 형식: `DefaultProfile-01-0`, `DefaultProfile-02-0` 등
-
-### ONVIF 서비스 엔드포인트
-
-| 서비스 | 경로 |
-|--------|------|
-| Device | `/onvif/device_service` |
-| Media | `/onvif/media_service` (GetCapabilities로 자동 확인) |
-| PTZ | `/onvif/ptz_service` |
 
 ---
 
 ## 토큰 인증
 
 ptz-proxy-electron은 WebSocket 연결 시 JWT 기반 토큰 인증을 지원합니다.
-
-### 설정
-
-앱 설정에서 **"토큰 인증"** 토글 ON/OFF:
 
 - **OFF (기본)**: 토큰 없이 누구나 WebSocket 연결 가능
 - **ON**: 웹앱에서 발급한 토큰이 있어야만 연결 허용
@@ -288,19 +237,6 @@ ptz-proxy-electron은 WebSocket 연결 시 JWT 기반 토큰 인증을 지원합
 5. ptz-proxy → GET /api/proxy-token/verify?token=xxx 검증
 6. 검증 통과 → 연결 허용 / 실패 → 4401 거부
 ```
-
-### 인증 중 메시지 버퍼링
-
-토큰 검증(HTTP 요청) 중에 브라우저가 보내는 메시지가 유실되지 않도록,
-연결 즉시 메시지를 버퍼링하고 인증 완료 후 순서대로 처리합니다.
-
-### 관련 파일 (웹앱)
-
-| 파일 | 역할 |
-|------|------|
-| `lib/proxy-token.ts` | 토큰 생성/검증 (HMAC-SHA256, TTL 60초) |
-| `app/api/ptz/connect/route.ts` | 연결 시 토큰 생성 후 URL에 포함 |
-| `app/api/proxy-token/verify/route.ts` | ptz-proxy의 토큰 검증 요청 처리 |
 
 > **환경변수**: `PROXY_TOKEN_SECRET` 설정 권장 (미설정 시 `NEXTAUTH_SECRET` 사용)
 
@@ -331,13 +267,9 @@ ptz-proxy-electron은 WebSocket 연결 시 JWT 기반 토큰 인증을 지원합
 
 | 값 | 설명 |
 |----|------|
-| `pelcod` | PelcoD 프로토콜 (RS-485 / TCP) |
-| `ujin` | Ujin 프로토콜 (PelcoD 변형) |
+| `pelcod` | PelcoD 프로토콜 (7바이트 프레임) |
+| `ujin` | Ujin 프로토콜 (PelcoD 확장, 13바이트 프레임) |
 | `onvif` | ONVIF SOAP over HTTP |
-
-**ONVIF 전용 필드:**
-- `username`, `password`: 카메라 계정
-- `profileToken`: 프로파일 토큰 (비워두면 자동 조회)
 
 ### PTZ 명령
 
@@ -354,25 +286,21 @@ ptz-proxy-electron은 WebSocket 연결 시 JWT 기반 토큰 인증을 지원합
 
 **지원 action:**
 
-| action | direction | 설명 |
-|--------|-----------|------|
+| action | direction / param | 설명 |
+|--------|-------------------|------|
 | `pan` | `left` / `right` | 좌우 회전 |
 | `tilt` | `up` / `down` | 상하 회전 |
 | `zoom` | `in` / `out` | 줌 |
 | `focus` | `near` / `far` | 초점 |
-| `preset` | `goto` | 프리셋 이동 |
+| `preset_goto` | preset: 1–255 | 프리셋 이동 |
+| `preset_set` | preset: 1–255 | 프리셋 저장 |
+| `preset_clear` | preset: 1–255 | 프리셋 삭제 (PelcoD만) |
 | `stop` | — | 정지 |
-
-### 기타 명령
-
-
-RAW 패킷 ---> 구현확인 필요..
-```json
-{
-    "type": "raw",
-    "packet": [255, 1, 0, 4, 32, 0, 37]
-}
-```
+| `aux_on` | aux: 1–6 | AUX 채널 ON |
+| `aux_off` | aux: 1–6 | AUX 채널 OFF |
+| `camera_setting` | setting, value | 카메라 설정 (AF, AI, AGC 등) |
+| `requestPosition` | — | 위치 쿼리 (Ujin) |
+| `queryPan` / `queryTilt` / `queryZoom` / `queryFocus` | — | 개별 축 위치 쿼리 (PelcoD) |
 
 ### 연결 해제 / 상태 확인
 
@@ -388,6 +316,7 @@ RAW 패킷 ---> 구현확인 필요..
 | `connected` | 카메라 연결 성공 |
 | `profiles` | ONVIF GetProfiles 자동 조회 완료 + 토큰 목록 |
 | `command_sent` | PTZ 명령 전송 완료 |
+| `position_report` | 카메라 위치 응답 (pan, tilt, zoom, focus 값) |
 | `pong` | ping 응답 |
 | `disconnected` | 연결 해제 완료 |
 | `error` | 오류 메시지 |
@@ -397,10 +326,6 @@ RAW 패킷 ---> 구현확인 필요..
 ## 문제 해결
 
 ### WebSocket 연결 실패
-
-```
-WebSocket connection to 'ws://localhost:9902' failed
-```
 
 1. ptz-proxy-electron이 실행 중인지 확인 (트레이 아이콘)
 2. 포트 번호 확인 (기본: 9902)
@@ -418,17 +343,7 @@ WebSocket connection to 'ws://localhost:9902' failed
 
 1. Profile Token 필드를 **비워두면** 자동 조회됨 (권장)
 2. 수동 입력 시 카메라의 실제 토큰 확인 필요
-   - 삼성/한화비전: `DefaultProfile-01-0` 형태
-   - ODM(ONVIF Device Manager) 등으로 실제 토큰 확인 가능
 3. ptz-proxy 로그에서 `프로파일 토큰:` 출력 확인
-
-### ONVIF PTZ가 동작하지 않음 (SOAP Fault)
-
-1. ptz-proxy 로그의 `명령 오류:` 메시지 확인
-2. 오류 로그 파일: `%AppData%\ptz-proxy-electron\onvif-error.log`
-   - SOAP Fault가 발생한 경우에만 기록됨
-3. 카메라 IP, 포트(보통 80), 계정 정보 재확인
-4. 인증 방식은 자동으로 협상되므로 별도 설정 불필요
 
 ### HTTPS 환경에서 ws:// 차단 (혼합 콘텐츠)
 
@@ -437,9 +352,9 @@ WebSocket connection to 'ws://localhost:9902' failed
 - 해결: nginx 등으로 `wss://` (WebSocket Secure) 프록시 구성
 - 또는: 브라우저 설정에서 해당 사이트의 혼합 콘텐츠 허용
 
-### 카메라가 응답하지 않을 때 확인할 것 
+### 카메라가 응답하지 않을 때
 
-1. 프로토콜 설정 확인 (PelcoD / ujin)
+1. 프로토콜 설정 확인 (PelcoD / Ujin)
 2. 장치 주소(Address) 확인 (카메라 DIP 스위치)
 3. Hex 모니터에서 TX 패킷 전송 여부 확인
 4. 속도(speed) 값이 0이 아닌지 확인

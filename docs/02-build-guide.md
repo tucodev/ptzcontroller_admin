@@ -17,7 +17,7 @@
 
 | 소프트웨어 | 버전          | 용도          |
 | ---------- | ------------- | ------------- |
-| Node.js    | **24.x 이상** | 런타임        |
+| Node.js    | **18.x 이상** | 런타임        |
 | Yarn       | 1.22.x 이상   | 패키지 매니저 |
 | Git        | 2.x 이상      | 버전 관리     |
 
@@ -27,14 +27,15 @@
 
 ```
 DATABASE_URL=...
-LICENSE_SECRET=...
-LICENSE_SERVER_URL=...
 NEXTAUTH_SECRET=...
+NEXTAUTH_URL=http://localhost:3000
+DB_TYPE=neon          # 또는 sqlite
+STORAGE_MODE=off      # neon 모드일 때: on=SQLite 백업, off=Neon만
 ```
 
 ### 2. 빌드 및 테스트
 
-```
+```bash
 cd ptzcontroller_admin
 npm install
 npx prisma generate
@@ -50,10 +51,10 @@ npm run dev
 # POST /api/license/verify → 라이선스 업로드
 ```
 
-### 4. 오프라인 DB 테스트 (DB 연결 끊은 후)
+### 4. 오프라인 DB 테스트 (Desktop 전용)
 
 ```
-# 로그인 시도 → offline-db 인증
+# DB 연결 끊은 후 Desktop 앱에서 로그인 시도 → offline-db 인증
 ```
 
 ---
@@ -65,14 +66,12 @@ npm run dev
 ```bash
 # Windows (winget)
 winget install OpenJS.NodeJS.LTS
-# 또는 nvm 사용
-nvm install 24
 
 # macOS (Homebrew)
-brew install node@24
+brew install node@18
 
 # Ubuntu/Debian
-curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
 sudo apt-get install -y nodejs
 ```
 
@@ -107,8 +106,6 @@ yarn prisma generate
 generator client {
   provider = "prisma-client-js"
   binaryTargets = ["native", "windows", "linux-musl-arm64-openssl-3.0.x"]
-  // output 항목이 있다면 제거할 것 (리눅스 외 OS에서 경로 오류 발생)
-  // 예 output   = "../../../home/ubuntu/..."  ← 이 줄이 문제를 일으킴(리눅스외 OS시)
 }
 ```
 
@@ -116,15 +113,7 @@ generator client {
 
 ```javascript
 const nextConfig = {
-    // *** tuco add ***
     output: "standalone", // ← 반드시 있어야 함 (standalone 빌드)
-    // *** tuco remove ***
-    // 아래사항은 삭제
-    // distDir: process.env.NEXT_DIST_DIR || '.next',
-    // output: process.env.NEXT_OUTPUT_MODE,
-    // experimental: {
-    //   outputFileTracingRoot: path.join(__dirname, '../'),
-    // },
     eslint: { ignoreDuringBuilds: true },
     typescript: { ignoreBuildErrors: false },
     images: { unoptimized: true },
@@ -134,16 +123,17 @@ module.exports = nextConfig;
 
 ### 주요 의존성
 
-| 패키지         | 버전    | 용도                           |
-| -------------- | ------- | ------------------------------ |
-| next           | 14.2.28 | Next.js 프레임워크             |
-| react          | 18.2.0  | UI 라이브러리                  |
-| next-auth      | 4.24.11 | 인증 (JWT 세션)                |
-| @prisma/client | 6.7.0   | 데이터베이스 ORM               |
-| framer-motion  | 10.x    | 애니메이션                     |
-| ws             | 8.x     | WebSocket (Proxy 모드)         |
-| next-themes    | 0.3.0   | 테마 관리                      |
-| archiver       | 7.x     | ZIP 생성 (Proxy 파일 다운로드) |
+| 패키지         | 용도                             |
+| -------------- | -------------------------------- |
+| next 14.x      | Next.js 프레임워크               |
+| react 18.x     | UI 라이브러리                    |
+| next-auth 4.x  | 인증 (JWT 세션)                  |
+| @prisma/client | 데이터베이스 ORM                 |
+| better-sqlite3 | SQLite 저장소 (오프라인/백업)    |
+| nodemailer     | SMTP 이메일 발송 (비밀번호 리셋) |
+| ws             | WebSocket (Proxy 모드)           |
+| next-themes    | 테마 관리                        |
+| archiver       | ZIP 생성 (Proxy 파일 다운로드)   |
 
 ---
 
@@ -152,70 +142,31 @@ module.exports = nextConfig;
 ### 데이터베이스 초기 설정 (최초 1회)
 
 ```bash
-# 마이그레이션 실행
-yarn prisma migrate deploy    <==== 이것을 사용한다.!
+# 이미 배포된 DB에 적용
+yarn prisma migrate deploy
 
+# 또는 개발 환경에서 새 DB 생성
 yarn prisma migrate dev --name init
 ```
 
-> **프롬프트가 나올 경우** `init` 입력
+> **`migrate dev` 프롬프트가 나올 경우**: 마이그레이션 이름 입력 (예: `init`)
 
-```
-      위 명령 입력시 처음에 다음 프롬프트가 나온다.
+> ⚠️ 이미 DB가 있는 경우 `migrate dev` 생략 가능.
+> DB 전체 초기화: `yarn prisma migrate reset` (데이터 삭제 주의).
 
-          "Enter a name for the new migration: »"
-
-
-      위 프롬프트는 마이그레이션 이름을 입력하는 프롬프트입니다.
-      해당 변경 사항을 설명하는 간단한 이름을 입력하면 됩니다.
-      (참고) yarn prisma migrate dev --name init <-- 위 명령 대신 이것을 실행하면 프롬프트 안나오고 초기화 될 것이다.
-
-      (1) 권장 입력값
-          초기 설정인 경우:
-
-              init  <--- 우리는 이걸 입력하자
-
-          또는
-
-              initial_setup
-
-
-      (2) 특정 변경인 경우 (예시):
-
-          add_user_table - 사용자 테이블 추가 시
-          add_session - 세션 테이블 추가 시
-          add_camera_config - 카메라 설정 추가 시
-
-
-      (주의) 위 명령은 db 생성하는 것으로 이미 있다면 하지 않아도 된다.
-             만약 중복 실행했다면, 질문에 답하면된다. 최악은 중요한 db가
-             Reset 되는 것이다.
-
-      [참고] 일부러 Reset하는 명령은
-
-          yarn prisma migrate reset
-
-          ? Are you sure you want to reset your database? All data will be lost. » (y/N) y
-```
-
-# Seed 데이터 생성 (테스트 계정 tyche@tyche.ooo)
+### Seed 데이터 생성 (테스트 계정)
 
 ```bash
-# 샘플 로그인 정보 1 계정 등록함
-
 yarn prisma db seed
 ```
 
-> ⚠️ 이미 DB가 있는 경우 `migrate dev` 생략 가능.  
-> 실수로 중복 실행 시 `yarn prisma migrate reset` 으로 초기화 (데이터 삭제 주의).
+### DB 조회 도구
 
-## DB 툴
-
-이 툴로 DB의 데이터 확인 및 수정 가능함.
-
+```bash
+npx prisma studio
 ```
-npx prisma studio "postgresql://neondb_owner:npg_cP1qQeFoMkO3@ep-patient-waterfall-a1tk4pzw-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-```
+
+> Prisma Studio는 `.env`의 `DATABASE_URL`을 자동으로 읽습니다.
 
 ### 개발 서버 시작
 
@@ -285,16 +236,43 @@ yarn build-cloudtype
 
 ## 환경 변수 설정
 
-### `.env` 파일
+### `.env` 파일 구조
 
 ```env
-# PostgreSQL 데이터베이스 URL (Neon 사용 예시)
-DATABASE_URL="postgresql://username:password@ep-xxxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+# ── 포트 ──
+PORT=3000
 
-# NextAuth 설정
-NEXTAUTH_SECRET="your-random-secret-key"
-NEXTAUTH_URL="http://localhost:3000"   # 로컬 개발용
-# NEXTAUTH_URL="https://your-domain.cloudtype.app"  # 운영 배포 시
+# ── 저장소 설정 ──
+# DB_TYPE: sqlite(기본) 또는 neon
+DB_TYPE=neon
+
+# STORAGE_MODE: DB_TYPE=neon일 때만 유효
+#   on  = Neon + SQLite 이중 저장
+#   off = Neon만 사용 (기본)
+STORAGE_MODE=off
+
+# ── 데이터베이스 ──
+DATABASE_URL="postgresql://user:pass@host/db?sslmode=require"
+
+# ── NextAuth ──
+NEXTAUTH_SECRET="(openssl rand -base64 32로 생성)"
+NEXTAUTH_URL="http://localhost:3000"
+
+# ── 라이선스 ──
+LICENSE_SECRET="your-license-secret"
+LICENSE_SERVER_URL="http://localhost:4000"
+
+# ── JWT ──
+JWT_SECRET=your-jwt-secret
+JWT_EXPIRES=8h
+
+# ── SMTP (비밀번호 재설정용) ──
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+APP_URL=http://localhost:3000
 ```
 
 > **Electron 데스크톱 빌드 시**: `NEXTAUTH_URL`이 없으면 `npm run copy:standalone` 실행 시 자동으로 `http://localhost:3000`이 추가됩니다.
@@ -304,6 +282,17 @@ NEXTAUTH_URL="http://localhost:3000"   # 로컬 개발용
 ```bash
 openssl rand -base64 32
 ```
+
+### 저장소 모드 설명
+
+| DB_TYPE | STORAGE_MODE | 동작                           |
+| ------- | ------------ | ------------------------------ |
+| sqlite  | (무시)       | SQLite만 사용                  |
+| neon    | off          | Neon(PostgreSQL)만 사용        |
+| neon    | on           | Neon + SQLite 이중 저장 (백업) |
+
+> Desktop 버전(`PTZ_DESKTOP_MODE=true`)은 STORAGE_MODE와 무관하게 항상 Neon+SQLite 이중 저장.
+> Admin 버전은 DB 접속 불가 시 에러 반환 (오프라인 폴백 없음).
 
 ---
 
@@ -337,3 +326,8 @@ yarn dev
 ```bash
 yarn tsc --noEmit
 ```
+
+### Prisma generate EPERM 에러 (Windows)
+
+`query_engine-windows.dll.node` 파일이 실행 중인 Node 프로세스에 의해 잠겨있는 경우 발생.
+개발 서버(`yarn dev`)를 중지한 후 `yarn prisma generate` 재실행.

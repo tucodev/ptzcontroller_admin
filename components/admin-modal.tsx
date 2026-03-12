@@ -628,7 +628,7 @@ export default function AdminModal({ onClose }: AdminModalProps) {
                     ))}
                     {proxyFiles.length === 0 && (
                       <p className="text-xs text-yellow-400/80 font-mono">
-                        💾 실행 파일 다운로드 → 소스 코드 ZIP (폴백)
+                        ⏳ 실행 파일 다운로드 → 설치파일 준비중
                       </p>
                     )}
                   </div>

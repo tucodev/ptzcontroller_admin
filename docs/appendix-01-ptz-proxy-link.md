@@ -1,51 +1,34 @@
 # ptz-proxy 파일 첨부 방법
 
-## 현재 구조 요약
+## 관리
 
-다운로드 팝업과 파일 제공은 2개 파일로 관리됩니다.
+admin 로그인 후 관리자 페이지(🛡️)의 **"Proxy 파일"** 탭에서 파일 업로드/관리가 가능합니다.
 
-파일 1: app/api/download/ptz-proxy/route.ts
+업로드된 파일은 `ptzcontroller_admin/public/downloads/` 에 저장되며,
+사용자가 Proxy 연결 실패 시 표시되는 팝업에서 다운로드 링크로 자동 노출됩니다.
 
-```
-다운로드되는 ZIP 안의 모든 파일 내용이 이 파일에 문자열로 하드코딩되어 있습니다.
+## 다운로드 ZIP 구조
 
-ZIP 생성 함수:
+`/api/download/ptz-proxy` 엔드포인트에서 동적으로 ZIP을 생성합니다.
+ZIP 내 파일 내용은 `app/api/download/ptz-proxy/route.ts`에 하드코딩되어 있습니다.
 
-getPtzProxySource() → ptz-proxy.js (핵심 proxy 서버)
+| 함수 | ZIP 내 파일명 | 설명 |
+|------|-------------|------|
+| `getPtzProxySource()` | `ptz-proxy.js` | 핵심 proxy 서버 소스 |
+| `getPackageJson()` | `package.json` | npm 의존성 |
+| `getStartBat()` | `start.bat` | Windows 실행 스크립트 |
+| `getStartSh()` | `start.sh` | Linux/Mac 실행 스크립트 |
+| `getBuildExeBat()` | `build-exe.bat` | EXE 빌드 스크립트 |
+| `getBuildExeSh()` | `build-exe.sh` | Linux/Mac EXE 빌드 스크립트 |
+| `getReadme()` | `README.md` | 사용 안내 |
 
-getPackageJson() → package.json
+**ptz-proxy.js 내용을 수정하려면** → `getPtzProxySource()` 함수 본문을 수정합니다.
 
-getStartBat() → start.bat (Windows 실행)
+## 수정 파일 요약
 
-getBuildExeBat() → build-exe.bat (EXE 빌드 스크립트)
-
-getReadme() → README.md
-
-ptz-proxy.js 내용을 바꾸고 싶다면 → getPtzProxySource() 함수 수정
-```
-
-파일 2: components/proxy-download-modal.tsx
-
-```
-팝업 UI와 다운로드 링크를 정의합니다.
-typescriptconst downloadLinks = [
-{ url: 'https://github.com/...', // GitHub 링크
-{ url: '/api/download/ptz-proxy', // 서버 동적 ZIP
-...
-```
-
-미
-리 빌드된 EXE를 직접 제공하려면
-
-```
-public/downloads/ptz-proxy.exe 파일 배치
-proxy-download-modal.tsx에 링크 추가:
-```
-
-typescript{ name: 'Windows EXE', url: '/downloads/ptz-proxy.exe', isLocal: true }
-
-EXE 빌드는 ZIP 안의 build-exe.bat을 실행하면 됩니다 (npx pkg 사용).
-
--->
-
-## 현재, 이 모든 것을 admin 로그인시 admin 페이지에서 조회 설정 가능하게 수정함
+| 목적 | 수정 파일 |
+|------|----------|
+| proxy 소스 내용 변경 | `app/api/download/ptz-proxy/route.ts` |
+| 다운로드 링크/UI 변경 | `components/proxy-download-modal.tsx` |
+| EXE 파일 직접 제공 | `public/downloads/` 에 파일 배치 + 위 두 파일 수정 |
+| 팝업 문구/안내 변경 | `components/proxy-download-modal.tsx` |

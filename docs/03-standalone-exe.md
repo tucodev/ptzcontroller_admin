@@ -272,10 +272,12 @@ binaryTargets = ["native", "windows", "linux-musl-arm64-openssl-3.0.x"]
 
 ## 환경변수 (.env) 관리
 
-`.env` 파일은 `npm run copy:standalone` 실행 시 `standalone/.env`로 자동 복사됩니다.  
-`DATABASE_URL`이 외부 PostgreSQL(Neon 등)을 가리키므로 배포 환경에서 DB 접근이 가능해야 합니다.
+`.env` 파일은 `npm run copy:standalone` 실행 시 `standalone/.env`로 자동 복사됩니다.
 
-**오프라인 환경에서 사용하려면:** SQLite로 전환하거나 로컬 PostgreSQL을 함께 배포하세요.
+**저장소 모드 (Desktop):**
+- 온라인: Neon(PostgreSQL) 기본 + SQLite 백업 (항상 이중 저장)
+- 오프라인: SQLite 폴백 (라이선스 검증 필요)
+- `DB_TYPE`, `STORAGE_MODE` 설정은 Desktop에서는 무시됩니다 (자동 이중 저장).
 
 ---
 
@@ -300,7 +302,10 @@ binaryTargets = ["native", "windows", "linux-musl-arm64-openssl-3.0.x"]
 WebSocket 연결 시 토큰 검증(HTTP 요청) 동안 도착하는 메시지를 버퍼에 저장하고,
 인증 완료 후 순서대로 처리합니다. (`connect` 메시지 유실 방지)
 
-### 주의: ptz-proxy-electron과의 차이
+### Desktop과 PTZ Proxy의 관계
 
-`ptzcontroller_desktop/electron/main.js`는 **데스크톱 앱 전용** 내장 proxy입니다.
-별도 ptz-proxy-electron 없이 Electron 앱 자체에서 WebSocket 서버를 구동합니다.
+Desktop 앱(`ptzcontroller_desktop`)은 PTZ Proxy를 **내장하고 있지 않습니다**.
+Admin 웹 버전과 동일하게, Proxy 모드 사용 시 별도로 `ptz-proxy-electron`을 실행해야 합니다.
+
+Desktop의 `electron/main.js`에는 ONVIF SOAP 통신 코드가 포함되어 있으나,
+이는 Direct 모드(카메라 직접 접근)에서 사용되는 코드입니다.
