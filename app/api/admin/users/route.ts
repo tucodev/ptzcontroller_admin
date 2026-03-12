@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import { requireAdmin, getSessionUser } from '@/lib/auth-utils';
 
 const USER_SELECT = {
-  id: true, email: true, name: true, organization: true, role: true, approved: true, createdAt: true,
+  id: true, email: true, name: true, organization: true, role: true, approved: true, createdAt: true, lastLoginAt: true, loginCount: true,
 } as const;
 
 export async function GET() {

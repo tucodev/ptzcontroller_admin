@@ -21,6 +21,8 @@ interface UserRow {
   role: string;
   approved: boolean;
   createdAt: string;
+  lastLoginAt: string | null;
+  loginCount: number;
 }
 
 interface ProxyFile {
@@ -443,6 +445,10 @@ export default function AdminModal({ onClose }: AdminModalProps) {
                           <p className="text-sm font-medium truncate">{u.email}</p>
                           <p className="text-xs text-muted-foreground">
                             {u.name ?? '-'} · {u.organization ?? '-'} · {u.role === 'admin' ? '관리자' : '일반'}
+                          </p>
+                          <p className="text-xs text-muted-foreground/70">
+                            최근 로그인: {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}
+                            {' · '}로그인 횟수: {u.loginCount ?? 0}회
                           </p>
                         </div>
                         {/* PTZ 허가 상태 뱃지 */}

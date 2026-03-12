@@ -21,6 +21,8 @@ model User {
   approved      Boolean      @default(false)  // 라이선스 승인 여부 (라이선스 서버에서 설정)
   resetToken    String?      // 비밀번호 리셋 토큰 (UUID)
   resetTokenExp DateTime?    // 토큰 만료시간
+  lastLoginAt   DateTime?    // 최근 로그인 시간
+  loginCount    Int          @default(0)  // 로그인 횟수
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
   configs       UserConfig[]

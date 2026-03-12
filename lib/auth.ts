@@ -67,7 +67,17 @@ export const authOptions: NextAuthOptions = {
             const isValid = await bcrypt.compare(credentials.password, user.password);
             if (isValid) {
               console.log(`[Auth] OK Online login success (${modeLabel}):`, credentials.email);
-              
+
+              // 로그인 시간·횟수 기록
+              try {
+                await prisma.user.update({
+                  where: { id: user.id },
+                  data: { lastLoginAt: new Date(), loginCount: { increment: 1 } },
+                });
+              } catch (err) {
+                console.warn('[Auth] WARN login tracking update failed:', err);
+              }
+
               // Sync to offline DB (id를 Neon ID와 동일하게 유지해야 카메라 파일 경로가 일치)
               try {
                 await saveOfflineUser({
