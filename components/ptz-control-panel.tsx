@@ -460,7 +460,7 @@ export default function PTZControlPanel({
               type="number" min="100" max="60000" step="100"
               value={autoQueryInterval}
               onChange={(e) => onAutoQueryIntervalChange?.(Math.max(100, Math.min(60000, parseInt(e.target.value, 10) || 1000)))}
-              disabled={!connected || !autoQueryEnabled}
+              disabled={!connected}
               className="w-20 px-2 py-1 bg-muted border border-border rounded-lg text-center text-sm font-mono disabled:opacity-50"
             />
             <span className="text-xs text-muted-foreground">ms</span>
