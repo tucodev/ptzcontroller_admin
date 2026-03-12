@@ -160,6 +160,22 @@ export default function AdminModal({ onClose }: AdminModalProps) {
     fetchUsers();
   }
 
+  async function handleResetPassword(u: UserRow) {
+    if (!confirm(`"${u.email}"에게 임시 비밀번호를 이메일로 발송하시겠습니까?`)) return;
+    setUserMsg(null);
+    const res = await fetch('/api/admin/users/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: u.id }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setUserMsg({ type: 'err', text: data.error ?? '비밀번호 리셋 실패' });
+      return;
+    }
+    setUserMsg({ type: 'ok', text: data.message || `${u.email}로 임시 비밀번호 발송 완료` });
+  }
+
   // ── Proxy 파일 API ────────────────────────────
   async function fetchProxyFiles() {
     setFilesLoading(true);
@@ -454,6 +470,11 @@ export default function AdminModal({ onClose }: AdminModalProps) {
                             title={u.approved ? '승인 취소' : 'PTZ 허가'}
                           >
                             {u.approved ? <ShieldOff className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+                          </button>
+                          <button onClick={() => handleResetPassword(u)}
+                            className="p-1.5 hover:bg-amber-500/10 rounded-md transition-colors text-muted-foreground hover:text-amber-500"
+                            title="비밀번호 리셋 (이메일 발송)">
+                            <KeyRound className="w-4 h-4" />
                           </button>
                           <button onClick={() => startEdit(u)}
                             className="p-1.5 hover:bg-muted rounded-md transition-colors text-muted-foreground hover:text-foreground">

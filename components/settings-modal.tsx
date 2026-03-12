@@ -52,7 +52,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     defaultProtocol: 'pelcod',
     proxyPort:       9902,
     logLevel:        'info',
-    theme:           'dark',
+    theme:           'system',
   });
 
   // ── 라이선스 상태 ─────────────────────────────────────────

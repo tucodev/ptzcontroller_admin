@@ -3,109 +3,62 @@
  *
  * 카메라, 프리셋, 설정을 사용자별로 분리하여 저장/조회한다.
  *
- * ── 저장 방식 (STORAGE_MODE 환경변수로 선택) ──────────────────
+ * ── 저장 방식 ────────────────────────────────────────────────
  *
- *   STORAGE_MODE=file  (기본값)
- *     사용자별로 별도 디렉토리에 JSON 파일로 저장.
- *     BASE_DIR/<userId>/cameras.json
- *     BASE_DIR/<userId>/presets.json
- *     BASE_DIR/<userId>/settings.json
+ *   DB_TYPE 환경변수로 기본 저장소를 선택한다.
  *
- *     BASE_DIR 우선순위:
- *       1. PTZ_DATA_DIR 환경변수 (Electron: app.getPath('userData') 자동 주입)
- *          Windows : C:\Users\<user>\AppData\Roaming\ptzcontroller_admin\
- *          macOS   : ~/Library/Application Support/ptzcontroller_admin/
- *          Linux   : ~/.config/ptzcontroller_admin/
- *       2. 공유 경로 환경변수 (웹 서버 배포 시 중앙 공유 스토리지 지정)
- *          PTZ_SHARED_DATA_DIR=C:\ProgramData\PTZController\Setting\
- *       3. 폴백 (개발/단순 배포): process.cwd()/data/
+ *   DB_TYPE=sqlite  (기본값)
+ *     SQLite(offline-db.ts user_configs 테이블)에만 저장.
+ *     STORAGE_MODE 값은 무시된다.
+ *     서버 1대(단독 배포)에 적합.
  *
- *   STORAGE_MODE=db
- *     Prisma(PostgreSQL)에 저장 (UserConfig 모델 필요).
+ *   DB_TYPE=neon
+ *     Neon(PostgreSQL) Prisma(UserConfig 모델)가 기본 저장소.
+ *     STORAGE_MODE 에 따라 SQLite 백업 여부가 결정된다.
+ *       STORAGE_MODE=on  → Neon 저장 + SQLite에도 동기화 (이중 저장)
+ *       STORAGE_MODE=off → Neon에만 저장 (기본값)
  *     다중 서버/클라우드 배포 환경에서 권장.
- *     ※ DB 모드 사용 시 prisma/schema.prisma 에 UserConfig 모델을 추가하고
- *       `npx prisma migrate dev` 를 실행해야 한다.
  *
- * ── 오프라인/Desktop 동작 ─────────────────────────────────────
- *   userId 파라미터에 'offline' 을 전달하면 항상 file 모드로 동작.
- *   (DB 연결 없이도 설정 저장/조회 가능)
+ * ── Admin vs Desktop ────────────────────────────────────────
+ *   Admin(웹 서버): offline 지원 없음. DB 접속 불가 시 에러 반환.
+ *   Desktop(Electron, PTZ_DESKTOP_MODE=true):
+ *     온라인(DB 접속 가능) → Neon 기본 + SQLite 백업 (항상 이중 저장)
+ *     오프라인(DB 접속 불가) → SQLite 폴백
+ *     userId='offline' → SQLite 직접 사용
  *
- * ── 하위 호환성 ──────────────────────────────────────────────
- *   STORAGE_MODE 미설정 또는 'file' 이면 기존 동작과 동일하게
- *   파일 기반으로 동작하되, userId를 경로에 포함해 사용자별로 분리한다.
- *   userId 없이 호출 시('shared') 기존 공유 경로(./data/)를 사용하므로
- *   기존 데이터를 그대로 유지할 수 있다.
+ * ── JSON 파일 저장 ──────────────────────────────────────────
+ *   ❌ 더 이상 JSON 파일을 읽거나 쓰지 않는다.
+ *   모든 데이터는 DB(Neon 또는 SQLite)에만 저장된다.
  */
 
-import fs from 'fs';
-import path from 'path';
 import { CameraConfig, PresetConfig, AppSettings } from './types';
 
-// ── 저장 모드 ──────────────────────────────────────────────────
-export type StorageMode = 'file' | 'db';
+// ── DB 타입 & 저장 모드 ─────────────────────────────────────
+
+export type DbType = 'sqlite' | 'neon';
+export type StorageMode = 'on' | 'off';
+
+export function getDbType(): DbType {
+  const t = process.env.DB_TYPE?.toLowerCase();
+  return t === 'neon' ? 'neon' : 'sqlite';
+}
 
 export function getStorageMode(): StorageMode {
-  const mode = process.env.STORAGE_MODE?.toLowerCase();
-  return mode === 'db' ? 'db' : 'file';
+  const m = process.env.STORAGE_MODE?.toLowerCase();
+  if (m === 'on') return 'on';
+  return 'off';
 }
 
-// ── 파일 저장 기본 디렉토리 결정 ──────────────────────────────
-function getBaseDir(): string {
-  // 1. Electron이 주입하는 userData 경로
-  if (process.env.PTZ_DATA_DIR) return process.env.PTZ_DATA_DIR;
-  // 2. 웹 서버 배포 시 중앙 공유 스토리지
-  if (process.env.PTZ_SHARED_DATA_DIR) return process.env.PTZ_SHARED_DATA_DIR;
-  // 3. 폴백
-  return path.join(process.cwd(), 'data');
-}
-
-/**
- * 사용자별 데이터 디렉토리 경로 반환
- * @param userId  사용자 ID. 'shared' 이면 공유(기존) 경로, 'offline' 이면 offline 전용 경로.
- */
-function getUserDataDir(userId?: string): string {
-  const base = getBaseDir();
-
-  // Desktop EXE: PTZ_FORCE_SHARED=true 이면 userId 무시 → BASE_DIR 바로 사용
-  // → C:\ProgramData\PTZController\cameras.json 으로 고정
-  if (process.env.PTZ_FORCE_SHARED === 'true') return base;
-
-  if (!userId || userId === 'shared') {
-    // 하위 호환: userId 없으면 기존 방식 (BASE_DIR 바로 사용)
-    return base;
-  }
-  // 사용자별 하위 디렉토리
-  // userId에 경로 구분자가 들어오면 안전하게 치환
-  const safeId = userId.replace(/[/\\:*?"<>|]/g, '_');
-  return path.join(base, 'users', safeId);
-}
-
-function getFilePaths(userId?: string) {
-  const DATA_DIR = getUserDataDir(userId);
-  return {
-    DATA_DIR,
-    CAMERAS_FILE:  path.join(DATA_DIR, 'cameras.json'),
-    PRESETS_FILE:  path.join(DATA_DIR, 'presets.json'),
-    SETTINGS_FILE: path.join(DATA_DIR, 'settings.json'),
-  };
-}
+const IS_DESKTOP = process.env.PTZ_DESKTOP_MODE === 'true';
 
 const DEFAULT_SETTINGS: AppSettings = {
   defaultProtocol: 'pelcod',
   proxyPort:       9902,
   logLevel:        'info',
-  theme:           'dark',
+  theme:           'system',
 };
 
 // ─── 인메모리 캐시 ────────────────────────────────────────────
-//
-// 목적: 매 API 요청마다 파일 I/O 를 반복하는 비용 절감
-// TTL:  60초 (환경변수 PTZ_CACHE_TTL_S 로 조정 가능)
-// 범위: 파일 모드 전용. DB 모드는 Prisma 커넥션 풀이 캐싱을 담당.
-//
-// 구조: Map<cacheKey, { data, expireAt }>
-//   cacheKey = `${userId}:cameras` | `${userId}:presets` | `${userId}:settings`
-
 const CACHE_TTL_MS = (Number(process.env.PTZ_CACHE_TTL_S ?? 60)) * 1000;
 
 interface CacheEntry<T> { data: T; expireAt: number; }
@@ -128,45 +81,7 @@ function cacheInvalidate(userId: string): void {
   }
 }
 
-// ─── 파일 I/O 헬퍼 (캐시 적용) ──────────────────────────────
-
-function ensureDataDir(userId?: string): void {
-  const { DATA_DIR } = getFilePaths(userId);
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-function readJsonFile<T>(filePath: string, defaultValue: T, userId?: string, cacheKey?: string): T {
-  // 캐시 히트
-  if (cacheKey) {
-    const cached = cacheGet<T>(cacheKey);
-    if (cached !== undefined) return cached;
-  }
-
-  ensureDataDir(userId);
-  let result = defaultValue;
-  try {
-    if (fs.existsSync(filePath)) {
-      result = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as T;
-    }
-  } catch (error) {
-    console.error(`Error reading ${filePath}:`, error);
-  }
-
-  if (cacheKey) cacheSet(cacheKey, result);
-  return result;
-}
-
-function writeJsonFile<T>(filePath: string, data: T, userId?: string, cacheKey?: string): void {
-  ensureDataDir(userId);
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-  // 쓰기 즉시 캐시 갱신 (다음 읽기 전까지 최신 데이터 유지)
-  if (cacheKey) cacheSet(cacheKey, data);
-}
-
-// ── DB 모드 동적 임포트 헬퍼 ─────────────────────────────────
-// DB 모드는 런타임에만 prisma를 사용하므로 동적 require로 순환 참조 방지
+// ── Neon(Prisma) 동적 임포트 ─────────────────────────────────
 let _prisma: import('./db').PrismaClientType | null = null;
 async function getPrisma() {
   if (!_prisma) {
@@ -176,24 +91,22 @@ async function getPrisma() {
   return _prisma!;
 }
 
-// ── SQLite 오프라인 동기화 헬퍼 ────────────────────────────────
-// Desktop(Electron) 전용. PTZ_DESKTOP_MODE=true 일 때만 활성화.
-// non-critical: 실패해도 동작에 영향 없음.
-const IS_DESKTOP = process.env.PTZ_DESKTOP_MODE === 'true';
+// ── SQLite 읽기/쓰기 헬퍼 ───────────────────────────────────
+// offline-db.ts 의 user_configs 테이블 사용
 
-function syncToOfflineSQLite(userId: string, key: string, value: unknown): void {
-  if (!IS_DESKTOP) return;
+function saveToSQLite(userId: string, key: string, value: unknown): void {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { saveOfflineConfig } = require('./offline-db') as {
       saveOfflineConfig: (userId: string, key: string, value: string) => void;
     };
     saveOfflineConfig(userId, key, JSON.stringify(value));
-  } catch { /* non-critical */ }
+  } catch (e) {
+    console.error(`[ConfigManager SQLite] write ${key} failed:`, e);
+  }
 }
 
-function readFromOfflineSQLite<T>(userId: string, key: string, fallback: T): T {
-  if (!IS_DESKTOP) return fallback;
+function readFromSQLite<T>(userId: string, key: string, fallback: T): T {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getOfflineConfig } = require('./offline-db') as {
@@ -201,25 +114,23 @@ function readFromOfflineSQLite<T>(userId: string, key: string, fallback: T): T {
     };
     const raw = getOfflineConfig(userId, key);
     if (raw !== null) return JSON.parse(raw) as T;
-  } catch { /* non-critical */ }
+  } catch (e) {
+    console.error(`[ConfigManager SQLite] read ${key} failed:`, e);
+  }
   return fallback;
 }
 
-// ── DB 모드: UserConfig 테이블 읽기/쓰기 ──────────────────────
+// ── Neon(Prisma) 읽기/쓰기 ──────────────────────────────────
 async function readDbConfig<T>(
   userId: string,
   key: 'cameras' | 'presets' | 'settings',
   defaultValue: T
 ): Promise<T> {
-  try {
-    const prisma = await getPrisma();
-    const row = await (prisma as any).userConfig.findUnique({
-      where: { userId_key: { userId, key } },
-    });
-    if (row?.value) return JSON.parse(row.value) as T;
-  } catch (e) {
-    console.error(`[ConfigManager DB] read ${key} failed:`, e);
-  }
+  const prisma = await getPrisma();
+  const row = await (prisma as any).userConfig.findUnique({
+    where: { userId_key: { userId, key } },
+  });
+  if (row?.value) return JSON.parse(row.value) as T;
   return defaultValue;
 }
 
@@ -228,53 +139,72 @@ async function writeDbConfig(
   key: 'cameras' | 'presets' | 'settings',
   data: unknown
 ): Promise<void> {
-  try {
-    const prisma = await getPrisma();
-    await (prisma as any).userConfig.upsert({
-      where: { userId_key: { userId, key } },
-      update: { value: JSON.stringify(data), updatedAt: new Date() },
-      create: { userId, key, value: JSON.stringify(data) },
-    });
-  } catch (e) {
-    console.error(`[ConfigManager DB] write ${key} failed:`, e);
-    throw e;
-  }
+  const prisma = await getPrisma();
+  await (prisma as any).userConfig.upsert({
+    where: { userId_key: { userId, key } },
+    update: { value: JSON.stringify(data), updatedAt: new Date() },
+    create: { userId, key, value: JSON.stringify(data) },
+  });
+}
+
+// ── 저장 전략 결정 ──────────────────────────────────────────
+
+/** SQLite 백업 수행 여부 (Neon 모드일 때만 의미 있음) */
+function shouldSyncToSQLite(): boolean {
+  if (getDbType() === 'sqlite') return false;
+  if (IS_DESKTOP) return true; // Desktop은 항상 이중 저장
+  return getStorageMode() === 'on';
+}
+
+/** 기본 저장소가 SQLite인지 여부 */
+function useSQLiteAsPrimary(uid: string): boolean {
+  if (IS_DESKTOP && uid === 'offline') return true;
+  return getDbType() === 'sqlite';
 }
 
 // ─── Camera Configuration ──────────────────────────────────
 
 export async function getCamerasAsync(userId?: string): Promise<CameraConfig[]> {
   const uid = userId ?? 'shared';
-  if (getStorageMode() === 'db' && uid !== 'offline') {
-    try {
-      const prisma = await getPrisma();
-      const row = await (prisma as any).userConfig.findUnique({
-        where: { userId_key: { userId: uid, key: 'cameras' } },
-      });
-      const cameras: CameraConfig[] = row?.value ? JSON.parse(row.value) : [];
-      // Desktop: Neon이 비어있으면 SQLite 확인 → 오프라인→온라인 전환 후 자동 업로드
-      if (IS_DESKTOP && cameras.length === 0) {
-        const sqliteCameras = readFromOfflineSQLite<CameraConfig[]>(uid, 'cameras', []);
-        if (sqliteCameras.length > 0) {
-          // SQLite → Neon 동기화 (오프라인 데이터를 클라우드에 업로드)
-          await writeDbConfig(uid, 'cameras', sqliteCameras);
-          return sqliteCameras;
-        }
-      }
-      // DB 성공 → SQLite 동기화. Desktop은 파일 사용 안함.
-      syncToOfflineSQLite(uid, 'cameras', cameras);
-      if (!IS_DESKTOP) writeJsonFile(getFilePaths(uid).CAMERAS_FILE, cameras, uid, `${uid}:cameras`);
-      return cameras;
-    } catch {
-      // DB 접속 불가 → SQLite 우선. Desktop은 파일 fallback 없음.
-      console.warn('[ConfigManager] DB unavailable, falling back to SQLite/file (cameras)');
-      const fileFallback = IS_DESKTOP ? [] : readJsonFile<CameraConfig[]>(getFilePaths(uid).CAMERAS_FILE, [], uid, `${uid}:cameras`);
-      return readFromOfflineSQLite<CameraConfig[]>(uid, 'cameras', fileFallback);
-    }
+  const ck = `${uid}:cameras`;
+
+  const cached = cacheGet<CameraConfig[]>(ck);
+  if (cached !== undefined) return cached;
+
+  // SQLite 기본 모드 (DB_TYPE=sqlite)
+  if (useSQLiteAsPrimary(uid)) {
+    const cameras = readFromSQLite<CameraConfig[]>(uid, 'cameras', []);
+    cacheSet(ck, cameras);
+    return cameras;
   }
-  // file 모드: Desktop은 SQLite, 웹서버는 파일
-  if (IS_DESKTOP) return readFromOfflineSQLite<CameraConfig[]>(uid, 'cameras', []);
-  return readJsonFile<CameraConfig[]>(getFilePaths(uid).CAMERAS_FILE, [], uid, `${uid}:cameras`);
+
+  // Neon 기본 모드 (DB_TYPE=neon)
+  try {
+    let cameras = await readDbConfig<CameraConfig[]>(uid, 'cameras', []);
+
+    // Desktop: Neon이 비어있으면 SQLite → Neon 동기화
+    if (IS_DESKTOP && cameras.length === 0) {
+      const sqliteCameras = readFromSQLite<CameraConfig[]>(uid, 'cameras', []);
+      if (sqliteCameras.length > 0) {
+        await writeDbConfig(uid, 'cameras', sqliteCameras);
+        cameras = sqliteCameras;
+      }
+    }
+
+    if (shouldSyncToSQLite()) saveToSQLite(uid, 'cameras', cameras);
+    cacheSet(ck, cameras);
+    return cameras;
+  } catch (e) {
+    // Desktop: DB 접속 불가 → SQLite 폴백
+    if (IS_DESKTOP) {
+      console.warn('[ConfigManager] DB unavailable, falling back to SQLite (cameras)');
+      const cameras = readFromSQLite<CameraConfig[]>(uid, 'cameras', []);
+      cacheSet(ck, cameras);
+      return cameras;
+    }
+    // Admin: offline 지원 없음 → 에러 전파
+    throw e;
+  }
 }
 
 export async function saveCameraAsync(camera: CameraConfig, userId?: string): Promise<CameraConfig> {
@@ -287,14 +217,14 @@ export async function saveCameraAsync(camera: CameraConfig, userId?: string): Pr
     ? cameras.map((c, i) => i === index ? { ...camera, updatedAt: now } : c)
     : [...cameras, { ...camera, createdAt: now, updatedAt: now }];
 
-  if (getStorageMode() === 'db' && uid !== 'offline') {
-    await writeDbConfig(uid, 'cameras', updated);
-    syncToOfflineSQLite(uid, 'cameras', updated);
-    if (!IS_DESKTOP) writeJsonFile(getFilePaths(uid).CAMERAS_FILE, updated, uid, `${uid}:cameras`);
+  if (useSQLiteAsPrimary(uid)) {
+    saveToSQLite(uid, 'cameras', updated);
   } else {
-    syncToOfflineSQLite(uid, 'cameras', updated);
-    if (!IS_DESKTOP) writeJsonFile(getFilePaths(uid).CAMERAS_FILE, updated, uid, `${uid}:cameras`);
+    await writeDbConfig(uid, 'cameras', updated);
+    if (shouldSyncToSQLite()) saveToSQLite(uid, 'cameras', updated);
   }
+
+  cacheInvalidate(uid);
   return camera;
 }
 
@@ -304,14 +234,14 @@ export async function deleteCameraAsync(id: string, userId?: string): Promise<bo
   const filtered = cameras.filter(c => c.id !== id);
   const deleted = filtered.length !== cameras.length;
 
-  if (getStorageMode() === 'db' && uid !== 'offline') {
-    await writeDbConfig(uid, 'cameras', filtered);
-    syncToOfflineSQLite(uid, 'cameras', filtered);
-    if (!IS_DESKTOP) writeJsonFile(getFilePaths(uid).CAMERAS_FILE, filtered, uid, `${uid}:cameras`);
+  if (useSQLiteAsPrimary(uid)) {
+    saveToSQLite(uid, 'cameras', filtered);
   } else {
-    syncToOfflineSQLite(uid, 'cameras', filtered);
-    if (!IS_DESKTOP) writeJsonFile(getFilePaths(uid).CAMERAS_FILE, filtered, uid, `${uid}:cameras`);
+    await writeDbConfig(uid, 'cameras', filtered);
+    if (shouldSyncToSQLite()) saveToSQLite(uid, 'cameras', filtered);
   }
+
+  cacheInvalidate(uid);
   return deleted;
 }
 
@@ -319,36 +249,38 @@ export async function deleteCameraAsync(id: string, userId?: string): Promise<bo
 
 export async function getPresetsAsync(cameraId?: string, userId?: string): Promise<PresetConfig[]> {
   const uid = userId ?? 'shared';
-  let presets: PresetConfig[];
+  const ck = `${uid}:presets`;
 
-  if (getStorageMode() === 'db' && uid !== 'offline') {
-    try {
-      const prisma = await getPrisma();
-      const row = await (prisma as any).userConfig.findUnique({
-        where: { userId_key: { userId: uid, key: 'presets' } },
-      });
-      presets = row?.value ? JSON.parse(row.value) : [];
-      // Desktop: Neon이 비어있으면 SQLite 확인 → 자동 업로드
-      if (IS_DESKTOP && presets.length === 0) {
-        const sqlitePresets = readFromOfflineSQLite<PresetConfig[]>(uid, 'presets', []);
-        if (sqlitePresets.length > 0) {
-          await writeDbConfig(uid, 'presets', sqlitePresets);
-          presets = sqlitePresets;
+  let presets = cacheGet<PresetConfig[]>(ck);
+
+  if (presets === undefined) {
+    if (useSQLiteAsPrimary(uid)) {
+      presets = readFromSQLite<PresetConfig[]>(uid, 'presets', []);
+    } else {
+      try {
+        presets = await readDbConfig<PresetConfig[]>(uid, 'presets', []);
+
+        if (IS_DESKTOP && presets.length === 0) {
+          const sqlitePresets = readFromSQLite<PresetConfig[]>(uid, 'presets', []);
+          if (sqlitePresets.length > 0) {
+            await writeDbConfig(uid, 'presets', sqlitePresets);
+            presets = sqlitePresets;
+          }
         }
-      } else {
-        syncToOfflineSQLite(uid, 'presets', presets);
-        if (!IS_DESKTOP) writeJsonFile(getFilePaths(uid).PRESETS_FILE, presets, uid, `${uid}:presets`);
+
+        if (shouldSyncToSQLite()) saveToSQLite(uid, 'presets', presets);
+      } catch (e) {
+        if (IS_DESKTOP) {
+          console.warn('[ConfigManager] DB unavailable, falling back to SQLite (presets)');
+          presets = readFromSQLite<PresetConfig[]>(uid, 'presets', []);
+        } else {
+          throw e;
+        }
       }
-    } catch {
-      console.warn('[ConfigManager] DB unavailable, falling back to SQLite/file (presets)');
-      const fileFallback = IS_DESKTOP ? [] : readJsonFile<PresetConfig[]>(getFilePaths(uid).PRESETS_FILE, [], uid, `${uid}:presets`);
-      presets = readFromOfflineSQLite<PresetConfig[]>(uid, 'presets', fileFallback);
     }
-  } else {
-    presets = IS_DESKTOP
-      ? readFromOfflineSQLite<PresetConfig[]>(uid, 'presets', [])
-      : readJsonFile<PresetConfig[]>(getFilePaths(uid).PRESETS_FILE, [], uid, `${uid}:presets`);
+    cacheSet(ck, presets);
   }
+
   return cameraId ? presets.filter(p => p.cameraId === cameraId) : presets;
 }
 
@@ -360,14 +292,14 @@ export async function savePresetAsync(preset: PresetConfig, userId?: string): Pr
     ? presets.map((p, i) => i === index ? preset : p)
     : [...presets, preset];
 
-  if (getStorageMode() === 'db' && uid !== 'offline') {
-    await writeDbConfig(uid, 'presets', updated);
-    syncToOfflineSQLite(uid, 'presets', updated);
-    if (!IS_DESKTOP) writeJsonFile(getFilePaths(uid).PRESETS_FILE, updated, uid, `${uid}:presets`);
+  if (useSQLiteAsPrimary(uid)) {
+    saveToSQLite(uid, 'presets', updated);
   } else {
-    syncToOfflineSQLite(uid, 'presets', updated);
-    if (!IS_DESKTOP) writeJsonFile(getFilePaths(uid).PRESETS_FILE, updated, uid, `${uid}:presets`);
+    await writeDbConfig(uid, 'presets', updated);
+    if (shouldSyncToSQLite()) saveToSQLite(uid, 'presets', updated);
   }
+
+  cacheInvalidate(uid);
   return preset;
 }
 
@@ -377,14 +309,14 @@ export async function deletePresetAsync(id: string, userId?: string): Promise<bo
   const filtered = presets.filter(p => p.id !== id);
   const deleted = filtered.length !== presets.length;
 
-  if (getStorageMode() === 'db' && uid !== 'offline') {
-    await writeDbConfig(uid, 'presets', filtered);
-    syncToOfflineSQLite(uid, 'presets', filtered);
-    if (!IS_DESKTOP) writeJsonFile(getFilePaths(uid).PRESETS_FILE, filtered, uid, `${uid}:presets`);
+  if (useSQLiteAsPrimary(uid)) {
+    saveToSQLite(uid, 'presets', filtered);
   } else {
-    syncToOfflineSQLite(uid, 'presets', filtered);
-    if (!IS_DESKTOP) writeJsonFile(getFilePaths(uid).PRESETS_FILE, filtered, uid, `${uid}:presets`);
+    await writeDbConfig(uid, 'presets', filtered);
+    if (shouldSyncToSQLite()) saveToSQLite(uid, 'presets', filtered);
   }
+
+  cacheInvalidate(uid);
   return deleted;
 }
 
@@ -392,32 +324,41 @@ export async function deletePresetAsync(id: string, userId?: string): Promise<bo
 
 export async function getSettingsAsync(userId?: string): Promise<AppSettings> {
   const uid = userId ?? 'shared';
-  if (getStorageMode() === 'db' && uid !== 'offline') {
-    try {
-      const prisma = await getPrisma();
-      const row = await (prisma as any).userConfig.findUnique({
-        where: { userId_key: { userId: uid, key: 'settings' } },
-      });
-      const settings: AppSettings = row?.value ? JSON.parse(row.value) : DEFAULT_SETTINGS;
-      // Desktop: Neon에 row가 없으면 SQLite 확인 → 자동 업로드
-      if (IS_DESKTOP && !row?.value) {
-        const sqliteSettings = readFromOfflineSQLite<AppSettings | null>(uid, 'settings', null);
-        if (sqliteSettings !== null) {
-          await writeDbConfig(uid, 'settings', sqliteSettings);
-          return sqliteSettings;
-        }
-      }
-      syncToOfflineSQLite(uid, 'settings', settings);
-      if (!IS_DESKTOP) writeJsonFile(getFilePaths(uid).SETTINGS_FILE, settings, uid, `${uid}:settings`);
-      return settings;
-    } catch {
-      console.warn('[ConfigManager] DB unavailable, falling back to SQLite/file (settings)');
-      const fileFallback = IS_DESKTOP ? DEFAULT_SETTINGS : readJsonFile<AppSettings>(getFilePaths(uid).SETTINGS_FILE, DEFAULT_SETTINGS, uid, `${uid}:settings`);
-      return readFromOfflineSQLite<AppSettings>(uid, 'settings', fileFallback);
-    }
+  const ck = `${uid}:settings`;
+
+  const cached = cacheGet<AppSettings>(ck);
+  if (cached !== undefined) return cached;
+
+  if (useSQLiteAsPrimary(uid)) {
+    const settings = readFromSQLite<AppSettings>(uid, 'settings', DEFAULT_SETTINGS);
+    cacheSet(ck, settings);
+    return settings;
   }
-  if (IS_DESKTOP) return readFromOfflineSQLite<AppSettings>(uid, 'settings', DEFAULT_SETTINGS);
-  return readJsonFile<AppSettings>(getFilePaths(uid).SETTINGS_FILE, DEFAULT_SETTINGS, uid, `${uid}:settings`);
+
+  try {
+    let settings = await readDbConfig<AppSettings>(uid, 'settings', DEFAULT_SETTINGS);
+
+    // Desktop: Neon에 데이터 없으면 SQLite → Neon 동기화
+    if (IS_DESKTOP && JSON.stringify(settings) === JSON.stringify(DEFAULT_SETTINGS)) {
+      const sqliteSettings = readFromSQLite<AppSettings | null>(uid, 'settings', null);
+      if (sqliteSettings !== null) {
+        await writeDbConfig(uid, 'settings', sqliteSettings);
+        settings = sqliteSettings;
+      }
+    }
+
+    if (shouldSyncToSQLite()) saveToSQLite(uid, 'settings', settings);
+    cacheSet(ck, settings);
+    return settings;
+  } catch (e) {
+    if (IS_DESKTOP) {
+      console.warn('[ConfigManager] DB unavailable, falling back to SQLite (settings)');
+      const settings = readFromSQLite<AppSettings>(uid, 'settings', DEFAULT_SETTINGS);
+      cacheSet(ck, settings);
+      return settings;
+    }
+    throw e;
+  }
 }
 
 export async function saveSettingsAsync(settings: Partial<AppSettings>, userId?: string): Promise<AppSettings> {
@@ -425,23 +366,25 @@ export async function saveSettingsAsync(settings: Partial<AppSettings>, userId?:
   const current = await getSettingsAsync(uid);
   const updated = { ...current, ...settings };
 
-  if (getStorageMode() === 'db' && uid !== 'offline') {
-    await writeDbConfig(uid, 'settings', updated);
-    syncToOfflineSQLite(uid, 'settings', updated);
-    if (!IS_DESKTOP) writeJsonFile(getFilePaths(uid).SETTINGS_FILE, updated, uid, `${uid}:settings`);
+  if (useSQLiteAsPrimary(uid)) {
+    saveToSQLite(uid, 'settings', updated);
   } else {
-    syncToOfflineSQLite(uid, 'settings', updated);
-    if (!IS_DESKTOP) writeJsonFile(getFilePaths(uid).SETTINGS_FILE, updated, uid, `${uid}:settings`);
+    await writeDbConfig(uid, 'settings', updated);
+    if (shouldSyncToSQLite()) saveToSQLite(uid, 'settings', updated);
   }
+
+  cacheInvalidate(uid);
   return updated;
 }
 
 // ─── 하위 호환 동기 API (기존 코드가 import 하는 함수명 유지) ─
+// ⚠️ 동기 API는 SQLite만 사용 (Prisma는 비동기 전용)
+// Desktop 빌드에서 사용. Admin에서는 async 버전 사용 권장.
 
 /** @deprecated async 버전(getCamerasAsync) 사용을 권장 */
 export function getCameras(userId?: string): CameraConfig[] {
   const uid = userId ?? 'shared';
-  return readJsonFile<CameraConfig[]>(getFilePaths(uid).CAMERAS_FILE, [], uid, `${uid}:cameras`);
+  return readFromSQLite<CameraConfig[]>(uid, 'cameras', []);
 }
 
 /** @deprecated async 버전(saveCameraAsync) 사용을 권장 */
@@ -456,7 +399,7 @@ export function saveCamera(camera: CameraConfig, userId?: string): CameraConfig 
   } else {
     cameras.push({ ...camera, createdAt: now, updatedAt: now });
   }
-  writeJsonFile(getFilePaths(uid).CAMERAS_FILE, cameras, uid, `${uid}:cameras`);
+  saveToSQLite(uid, 'cameras', cameras);
   return camera;
 }
 
@@ -465,14 +408,14 @@ export function deleteCamera(id: string, userId?: string): boolean {
   const uid = userId ?? 'shared';
   const cameras = getCameras(uid);
   const filtered = cameras.filter(c => c.id !== id);
-  writeJsonFile(getFilePaths(uid).CAMERAS_FILE, filtered, uid, `${uid}:cameras`);
+  saveToSQLite(uid, 'cameras', filtered);
   return filtered.length !== cameras.length;
 }
 
 /** @deprecated */
 export function getPresets(cameraId?: string, userId?: string): PresetConfig[] {
   const uid = userId ?? 'shared';
-  const presets = readJsonFile<PresetConfig[]>(getFilePaths(uid).PRESETS_FILE, [], uid);
+  const presets = readFromSQLite<PresetConfig[]>(uid, 'presets', []);
   return cameraId ? presets.filter(p => p.cameraId === cameraId) : presets;
 }
 
@@ -482,7 +425,7 @@ export function savePreset(preset: PresetConfig, userId?: string): PresetConfig 
   const presets = getPresets(undefined, uid);
   const index = presets.findIndex(p => p.id === preset.id);
   if (index >= 0) { presets[index] = preset; } else { presets.push(preset); }
-  writeJsonFile(getFilePaths(uid).PRESETS_FILE, presets, uid);
+  saveToSQLite(uid, 'presets', presets);
   return preset;
 }
 
@@ -491,20 +434,20 @@ export function deletePreset(id: string, userId?: string): boolean {
   const uid = userId ?? 'shared';
   const presets = getPresets(undefined, uid);
   const filtered = presets.filter(p => p.id !== id);
-  writeJsonFile(getFilePaths(uid).PRESETS_FILE, filtered, uid);
+  saveToSQLite(uid, 'presets', filtered);
   return filtered.length !== presets.length;
 }
 
 /** @deprecated */
 export function getSettings(userId?: string): AppSettings {
   const uid = userId ?? 'shared';
-  return readJsonFile<AppSettings>(getFilePaths(uid).SETTINGS_FILE, DEFAULT_SETTINGS, uid);
+  return readFromSQLite<AppSettings>(uid, 'settings', DEFAULT_SETTINGS);
 }
 
 /** @deprecated */
 export function saveSettings(settings: Partial<AppSettings>, userId?: string): AppSettings {
   const uid = userId ?? 'shared';
   const updated = { ...getSettings(uid), ...settings };
-  writeJsonFile(getFilePaths(uid).SETTINGS_FILE, updated, uid);
+  saveToSQLite(uid, 'settings', updated);
   return updated;
 }

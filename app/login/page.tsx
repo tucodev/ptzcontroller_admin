@@ -838,6 +838,17 @@ export default function LoginPage() {
                                     </button>
                                 </div>
                             </div>
+                            {/* 비밀번호 찾기 링크 (로그인 모드일 때만) */}
+                            {isLogin && (
+                                <div className="text-right">
+                                    <a
+                                        href="/reset-password"
+                                        className="text-xs text-primary hover:underline"
+                                    >
+                                        비밀번호를 잊으셨나요?
+                                    </a>
+                                </div>
+                            )}
                             <button
                                 type="submit"
                                 disabled={loading}

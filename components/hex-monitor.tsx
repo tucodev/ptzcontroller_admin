@@ -136,6 +136,20 @@ export default function HexMonitor({ logs, onClear }: HexMonitorProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Tyche Logo */}
+          <a
+            href="https://www.tyche.pro"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="mr-6 opacity-40 hover:opacity-70 transition-opacity"
+            title="TYCHE Inc."
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/tyche-horz.svg" alt="TYCHE" className="h-4 w-auto dark:hidden" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/tyche-horz-dark.svg" alt="TYCHE" className="h-4 w-auto hidden dark:block" />
+          </a>
           {isExpanded && (
             <>
               <button

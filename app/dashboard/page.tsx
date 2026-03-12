@@ -38,6 +38,15 @@ export default function DashboardPage() {
     const logIdCounter = useRef(0);
     const MAX_HEX_LOGS = 500; // Circular buffer 최대 크기
 
+    // ── 카메라 위치 정보 (Ujin F0h / PelcoD 축별 Return) ──
+    const [currentPosition, setCurrentPosition] = useState<{
+        pan: number; tilt: number; zoom: number; focus: number;
+    }>({ pan: 0, tilt: 0, zoom: 0, focus: 0 });
+
+    // ── Position Auto-Query ──
+    const [autoQueryEnabled, setAutoQueryEnabled] = useState(true);
+    const [autoQueryInterval, setAutoQueryInterval] = useState(1000); // ms 단위
+
     // ── 오프라인 모드 ──────────────────────────────────────────
     const [isOfflineMode, setIsOfflineMode] = useState(false);
 
@@ -196,6 +205,14 @@ export default function DashboardPage() {
                         case "error":
                             addHexLog("rx", `Error: ${msg.message}`, "error");
                             break;
+                        case "position_report":
+                            // 좌표 보고: Ujin은 4축 한번에, PelcoD는 축별 부분 업데이트
+                            if (msg.position) {
+                                setCurrentPosition(prev => ({ ...prev, ...msg.position }));
+                                const axes = Object.entries(msg.position).map(([k, v]) => `${k}=${v}`).join(' ');
+                                addHexLog("rx", `Position: ${axes}`, "position");
+                            }
+                            break;
                         case "pong":
                             // heartbeat 응답 — 로그 생략
                             break;
@@ -240,6 +257,7 @@ export default function DashboardPage() {
             setWsConnection(null);
         }
         setConnectionStatus("disconnected");
+        setAutoQueryEnabled(false); // 연결 해제 시 auto-query 중지
     }, [wsConnection]);
 
     // ─── Heartbeat (30초마다 WebSocket 상태 확인) ─────────────
@@ -265,6 +283,49 @@ export default function DashboardPage() {
         return () => clearInterval(timer);
     }, [connectionStatus, wsConnection, addHexLog]);
 
+    // ─── Position Auto-Query 타이머 ─────────────────────────
+    useEffect(() => {
+        if (!autoQueryEnabled || connectionStatus !== "connected" || !wsConnection || !selectedCamera) return;
+
+        const proto = (selectedCamera.protocol || 'pelcod').toLowerCase();
+        const intervalMs = Math.max(100, autoQueryInterval);
+
+        const timer = setInterval(() => {
+            if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) return;
+
+            if (proto === 'ujin') {
+                // Ujin: requestPosition 한 번으로 4축 모두 수신
+                wsConnection.send(JSON.stringify({
+                    type: "command",
+                    command: {
+                        action: 'requestPosition',
+                        address: selectedCamera.address ?? 1,
+                        protocol: selectedCamera.protocol ?? 'ujin',
+                    },
+                }));
+            } else {
+                // PelcoD: 4축 순차 조회 (각 100ms 간격)
+                (['pan', 'tilt', 'zoom', 'focus'] as const).forEach((axis, i) => {
+                    setTimeout(() => {
+                        if (wsConnection.readyState === WebSocket.OPEN) {
+                            wsConnection.send(JSON.stringify({
+                                type: "command",
+                                command: {
+                                    action: 'queryPosition',
+                                    axis,
+                                    address: selectedCamera.address ?? 1,
+                                    protocol: selectedCamera.protocol ?? 'pelcod',
+                                },
+                            }));
+                        }
+                    }, i * 100);
+                });
+            }
+        }, intervalMs);
+
+        return () => clearInterval(timer);
+    }, [autoQueryEnabled, autoQueryInterval, connectionStatus, wsConnection, selectedCamera]);
+
     // ─── PTZ 명령 전송 (WebSocket 직접 전송) ─────────────────
     const sendCommand = useCallback((command: PTZCommand) => {
         if (!isApproved) return; // 허가 없으면 명령 차단
@@ -281,7 +342,16 @@ export default function DashboardPage() {
     }, [isApproved, selectedCamera, wsConnection]);
 
     const handleSelectCamera = (camera: CameraConfig) => {
-        if (selectedCamera?.id !== camera.id) handleDisconnect();
+        // 같은 카메라 재선택 → 무시
+        if (selectedCamera?.id === camera.id) return;
+
+        // 연결 중인 카메라가 있으면 확인 후 전환
+        if (connectionStatus === "connected") {
+            if (!window.confirm(`현재 "${selectedCamera?.name}"에 연결 중입니다.\n연결을 끊고 "${camera.name}"(으)로 전환하시겠습니까?`)) {
+                return; // 취소 → 기존 카메라 유지
+            }
+            handleDisconnect();
+        }
         setSelectedCamera(camera);
     };
 
@@ -304,10 +374,19 @@ export default function DashboardPage() {
             <header className="sticky top-0 z-50 backdrop-blur-lg bg-background/80 border-b border-border">
                 <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <div className="bg-primary/20 p-2 rounded-lg">
-                            <Camera className="w-6 h-6 text-primary" />
-                        </div>
-                        <h1 className="text-xl font-bold">TYCHE PTZ Controller</h1>
+                        <a
+                            href="https://www.tyche.pro"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-shrink-0 hover:opacity-80 transition-opacity"
+                            title="TYCHE Inc."
+                        >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src="/tyche-vert.svg" alt="TYCHE" className="h-8 w-auto dark:hidden" />
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src="/tyche-vert-dark.svg" alt="TYCHE" className="h-8 w-auto hidden dark:block" />
+                        </a>
+                        <h1 className="text-xl font-bold">PTZ Controller</h1>
                         {isLicensed && (
                             <div
                                 title={`오프라인 라이선스 보유중${licenseExpiry ? " · 만료: " + licenseExpiry.slice(0, 10) : ""}`}
@@ -496,6 +575,11 @@ export default function DashboardPage() {
                                         camera={selectedCamera}
                                         connected={connectionStatus === "connected"}
                                         onCommand={sendCommand}
+                                        position={currentPosition}
+                                        autoQueryEnabled={autoQueryEnabled}
+                                        autoQueryInterval={autoQueryInterval}
+                                        onAutoQueryEnabledChange={setAutoQueryEnabled}
+                                        onAutoQueryIntervalChange={setAutoQueryInterval}
                                     />
                                 </>
                             ) : (
