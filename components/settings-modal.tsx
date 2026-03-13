@@ -142,18 +142,20 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     setLic(prev => ({ ...prev, status: 'gathering', message: '' }));
 
     // 1) ptz-proxy-electron 에서 HW 정보 수집 (필수)
+    //    wmic 등 시스템 명령 첫 호출 시 느릴 수 있으므로 타임아웃 10초
     let machineIds: string[] = [];
     let fromProxy = false;
     try {
       const hwRes = await fetch(
         `http://localhost:${settings.proxyPort}/hw-info`,
-        { signal: AbortSignal.timeout(5_000) }
+        { signal: AbortSignal.timeout(10_000) }
       );
       if (hwRes.ok) {
         const hw = await hwRes.json();
         if (Array.isArray(hw.machineIds) && hw.machineIds.length > 0) {
           machineIds = hw.machineIds as string[];
           fromProxy = true;
+          setProxyStatus('running'); // HW 응답 성공 → proxy 실행 확인
         }
       }
     } catch { /* proxy 미실행 */ }
@@ -314,7 +316,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     const proxyPort = port ?? settings.proxyPort;
     setProxyStatus('checking');
     try {
-      const res = await fetch(`http://localhost:${proxyPort}/hw-info`,
+      const res = await fetch(`http://localhost:${proxyPort}/health`,
         { signal: AbortSignal.timeout(3_000) });
       setProxyStatus(res.ok ? 'running' : 'stopped');
     } catch {
