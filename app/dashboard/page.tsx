@@ -6,7 +6,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
     Camera, LogOut, Settings, Plus, Loader2,
-    Video, Wifi, WifiOff, Shield, AlertTriangle, ShieldCheck, Lock, UserCog,
+    Video, Wifi, WifiOff, Shield, AlertTriangle, ShieldCheck, Lock, UserCog, Download, X,
 } from "lucide-react";
 import PTZControlPanel from "@/components/ptz-control-panel";
 import CameraList from "@/components/camera-list";
@@ -39,6 +39,11 @@ export default function DashboardPage() {
     const hexLogBuffer = useRef<HexLogEntry[]>([]);
     const hexLogFlushScheduled = useRef(false);
     const MAX_HEX_LOGS = 500; // Circular buffer 최대 크기
+
+    // ── Proxy 업데이트 알림 ─────────────────────────────────
+    const [proxyVersion, setProxyVersion]             = useState<string | null>(null);
+    const [latestProxyVersion, setLatestProxyVersion] = useState<string | null>(null);
+    const [proxyUpdateDismissed, setProxyUpdateDismissed] = useState(false);
 
     // ── 카메라 위치 정보 (Ujin F0h / PelcoD 축별 Return) ──
     const [currentPosition, setCurrentPosition] = useState<{
@@ -230,6 +235,8 @@ export default function DashboardPage() {
                         case "welcome":
                             // 프록시 서버 연결 확인 로그
                             addHexLog("rx", `Proxy ${msg.version ?? ''}`.trim(), "welcome");
+                            // Proxy 버전 저장 → 업데이트 알림에 사용
+                            if (msg.version) setProxyVersion(msg.version);
                             break;
                         default:
                             if (msg.data) addHexLog("rx", msg.data, msg.type || "response");
@@ -341,6 +348,24 @@ export default function DashboardPage() {
             pendingTimeouts.forEach(t => clearTimeout(t));
         };
     }, [autoQueryEnabled, autoQueryInterval, connectionStatus, wsConnection, selectedCamera]);
+
+    // ─── Proxy 업데이트 확인 ────────────────────────────────
+    useEffect(() => {
+        if (!proxyVersion) return;
+        fetch('/api/proxy/latest-version')
+            .then(r => r.json())
+            .then(d => {
+                if (d.latestVersion) setLatestProxyVersion(d.latestVersion);
+            })
+            .catch(() => { /* 조회 실패 시 배너 미표시 */ });
+    }, [proxyVersion]);
+
+    const showProxyUpdateBanner = !!(
+        proxyVersion &&
+        latestProxyVersion &&
+        proxyVersion !== latestProxyVersion &&
+        !proxyUpdateDismissed
+    );
 
     // ─── PTZ 명령 전송 (WebSocket 직접 전송) ─────────────────
     const sendCommand = useCallback((command: PTZCommand) => {
@@ -464,6 +489,33 @@ export default function DashboardPage() {
                     <div className="max-w-7xl mx-auto flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
                         <AlertTriangle className="w-4 h-4 shrink-0" />
                         <span>오프라인 모드 — DB 연결 없이 실행 중입니다. 관리자 기능을 사용하려면 DB 연결 후 재로그인하세요.</span>
+                    </div>
+                </div>
+            )}
+
+            {/* Proxy 업데이트 배너 */}
+            {showProxyUpdateBanner && (
+                <div className="bg-blue-500/10 border-b border-blue-500/30 px-4 py-2">
+                    <div className="max-w-7xl mx-auto flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400">
+                            <Download className="w-4 h-4 shrink-0" />
+                            <span>
+                                PTZ Proxy 업데이트가 있습니다 (현재 v{proxyVersion} → 최신 v{latestProxyVersion})
+                            </span>
+                            <button
+                                onClick={() => setShowProxyDownload(true)}
+                                className="ml-2 px-3 py-0.5 rounded-md bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium transition-colors"
+                            >
+                                다운로드
+                            </button>
+                        </div>
+                        <button
+                            onClick={() => setProxyUpdateDismissed(true)}
+                            className="p-1 hover:bg-blue-500/20 rounded transition-colors text-blue-500"
+                            title="이 세션에서 숨기기"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
                     </div>
                 </div>
             )}

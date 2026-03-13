@@ -72,6 +72,10 @@ export default function AdminModal({ onClose }: AdminModalProps) {
   const [cloudUrlInput, setCloudUrlInput] = useState('');
   const [cloudUrlSaving, setCloudUrlSaving] = useState(false);
 
+  // 최신 Proxy 버전
+  const [latestVersion, setLatestVersion] = useState('');
+  const [latestVersionSaving, setLatestVersionSaving] = useState(false);
+
   // ── 초기 로드 ─────────────────────────────────
   useEffect(() => { fetchUsers(); }, []);
   useEffect(() => { if (tab === 'proxy') fetchProxyFiles(); }, [tab]);
@@ -189,6 +193,10 @@ export default function AdminModal({ onClose }: AdminModalProps) {
         setCloudDownloadUrl(data.cloudDownloadUrl ?? null);
         setCloudUrlInput(data.cloudDownloadUrl ?? '');
       }
+      // 최신 버전 정보도 로드
+      const verRes = await fetch('/api/proxy/latest-version');
+      const verData = await verRes.json();
+      setLatestVersion(verData.latestVersion ?? '');
     } finally {
       setFilesLoading(false);
     }
@@ -209,6 +217,23 @@ export default function AdminModal({ onClose }: AdminModalProps) {
       setFileMsg({ type: 'ok', text: 'Cloud Download URL 저장됨.' });
     } finally {
       setCloudUrlSaving(false);
+    }
+  }
+
+  async function saveLatestVersion() {
+    setLatestVersionSaving(true);
+    setFileMsg(null);
+    try {
+      const res = await fetch('/api/admin/proxy-file', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ latestVersion: latestVersion.trim() || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setFileMsg({ type: 'err', text: data.error ?? 'Failed' }); return; }
+      setFileMsg({ type: 'ok', text: `최신 Proxy 버전이 "${latestVersion.trim() || '(없음)'}"으로 저장되었습니다.` });
+    } finally {
+      setLatestVersionSaving(false);
     }
   }
 
@@ -550,6 +575,34 @@ export default function AdminModal({ onClose }: AdminModalProps) {
                   {cloudDownloadUrl && (
                     <p className="text-xs text-sky-400/70 font-mono truncate">현재: {cloudDownloadUrl}</p>
                   )}
+                </div>
+
+                {/* 최신 Proxy 버전 */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Download className="w-4 h-4 text-green-400" />
+                    <h3 className="text-sm font-medium">최신 Proxy 버전</h3>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    배포 중인 Proxy의 최신 버전을 입력하세요. 사용자가 이전 버전의 Proxy로 접속하면 업데이트 알림이 표시됩니다.
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={latestVersion}
+                      onChange={(e) => setLatestVersion(e.target.value)}
+                      placeholder="예: 1.0.2"
+                      className="flex-1 px-3 py-2 bg-muted border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono"
+                    />
+                    <button
+                      onClick={saveLatestVersion}
+                      disabled={latestVersionSaving}
+                      className="px-4 py-2 bg-green-500/20 hover:bg-green-500/30 text-green-400 border border-green-500/30 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {latestVersionSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                      저장
+                    </button>
+                  </div>
                 </div>
 
                 {/* 업로드 영역 */}

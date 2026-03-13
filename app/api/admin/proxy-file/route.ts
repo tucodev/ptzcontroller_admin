@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireSession, requireAdmin } from '@/lib/auth-utils';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 
 // 업로드 파일 저장 경로: public/downloads/
 const DOWNLOADS_DIR = path.join(process.cwd(), 'public', 'downloads');
@@ -17,7 +18,14 @@ function ensureDownloadsDir() {
   }
 }
 
-function readConfig(): { cloudDownloadUrl: string | null } {
+interface ProxyConfig {
+  cloudDownloadUrl: string | null;
+  latestVersion?: string | null;
+  fileHash?: string | null;
+  updatedAt?: string | null;
+}
+
+function readConfig(): ProxyConfig {
   if (!fs.existsSync(CONFIG_FILE)) return { cloudDownloadUrl: null };
   try {
     return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'));
@@ -26,7 +34,7 @@ function readConfig(): { cloudDownloadUrl: string | null } {
   }
 }
 
-function writeConfig(data: { cloudDownloadUrl: string | null }) {
+function writeConfig(data: ProxyConfig) {
   ensureDownloadsDir();
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2));
 }
@@ -90,11 +98,19 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer());
     fs.writeFileSync(path.join(DOWNLOADS_DIR, safeName), buffer);
 
+    // SHA-256 해시 계산 → proxy-config.json에 저장
+    const fileHash = 'sha256:' + crypto.createHash('sha256').update(buffer).digest('hex');
+    const config = readConfig();
+    config.fileHash = fileHash;
+    config.updatedAt = new Date().toISOString();
+    writeConfig(config);
+
     return NextResponse.json({
       success: true,
       filename: safeName,
       size: buffer.length,
       downloadUrl: `/downloads/${safeName}`,
+      fileHash,
     });
   } catch (err) {
     console.error('Upload proxy file error:', err);
@@ -108,13 +124,29 @@ export async function PATCH(request: NextRequest) {
   if (error) return error;
 
   try {
-    const { cloudDownloadUrl } = await request.json();
+    const { cloudDownloadUrl, latestVersion } = await request.json();
     if (cloudDownloadUrl !== undefined && cloudDownloadUrl !== null && typeof cloudDownloadUrl !== 'string') {
       return NextResponse.json({ error: 'cloudDownloadUrl must be a string or null' }, { status: 400 });
     }
+    if (latestVersion !== undefined && latestVersion !== null && typeof latestVersion !== 'string') {
+      return NextResponse.json({ error: 'latestVersion must be a string or null' }, { status: 400 });
+    }
+
+    const config = readConfig();
     const url = typeof cloudDownloadUrl === 'string' ? cloudDownloadUrl.trim() : null;
-    writeConfig({ cloudDownloadUrl: url || null });
-    return NextResponse.json({ success: true, cloudDownloadUrl: url || null });
+
+    // cloudDownloadUrl이 전달되었으면 업데이트
+    if (cloudDownloadUrl !== undefined) {
+      config.cloudDownloadUrl = url || null;
+    }
+    // latestVersion이 전달되었으면 업데이트
+    if (latestVersion !== undefined) {
+      config.latestVersion = typeof latestVersion === 'string' ? latestVersion.trim() || null : null;
+      config.updatedAt = new Date().toISOString();
+    }
+
+    writeConfig(config);
+    return NextResponse.json({ success: true, cloudDownloadUrl: config.cloudDownloadUrl, latestVersion: config.latestVersion ?? null });
   } catch (err) {
     console.error('Save cloud download URL error:', err);
     return NextResponse.json({ error: 'Failed to save config' }, { status: 500 });
