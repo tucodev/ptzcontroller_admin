@@ -349,13 +349,19 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await fetch('/api/config/settings', {
+      const res = await fetch('/api/config/settings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
       });
+      if (!res.ok) {
+        console.error('Save settings failed:', res.status);
+        alert('설정 저장에 실패했습니다. 다시 시도해 주세요.');
+        return;
+      }
       onClose();
     } catch (e) {
       console.error('Save settings error:', e);
+      alert('설정 저장 중 오류가 발생했습니다.');
     } finally {
       setSaving(false);
     }
@@ -725,8 +731,11 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
               {/* Proxy Port */}
               <div>
                 <label className="block text-sm text-muted-foreground mb-1">Proxy WebSocket Port</label>
-                <input type="number" value={settings?.proxyPort ?? 9902}
-                  onChange={e => updateSettings('proxyPort', parseInt(e.target.value, 10))}
+                <input type="number" min={1024} max={65535} value={settings?.proxyPort ?? 9902}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v >= 1024 && v <= 65535) updateSettings('proxyPort', v);
+                  }}
                   className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary" />
               </div>
 

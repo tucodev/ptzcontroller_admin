@@ -194,8 +194,11 @@ export default function AddCameraModal({ onClose, onSave, editCamera }: AddCamer
               <div>
                 <label className="block text-sm text-muted-foreground mb-1">Port</label>
                 <input
-                  type="number" value={form.port}
-                  onChange={(e) => upd('port', parseInt(e.target.value, 10))}
+                  type="number" min={1} max={65535} value={form.port}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v >= 1 && v <= 65535) upd('port', v);
+                  }}
                   className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary"
                 />
               </div>
