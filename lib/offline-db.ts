@@ -79,17 +79,34 @@ export function getOfflineDbPath(): string {
 }
 
 /**
+ * 클라우드 환경 감지 (SQLite 불필요)
+ * - DATABASE_URL 존재 = Neon PostgreSQL 사용 중 = 클라우드 배포
+ * - ELECTRON_RUN_AS_NODE 또는 로컬 환경 = Desktop 모드
+ */
+function isCloudEnvironment(): boolean {
+  return !!(process.env.DATABASE_URL && !process.env.ELECTRON_RUN_AS_NODE);
+}
+
+/**
  * SQLite DB 초기화
  */
 export function initOfflineDb(): void {
+  // 클라우드 환경에서는 SQLite 오프라인 DB 불필요 — 건너뜀
+  if (isCloudEnvironment()) {
+    console.log('[OfflineDB] Cloud environment detected — skipping SQLite init');
+    return;
+  }
+
   try {
     const dbPath = getOfflineDbPath();
     db = new Database(dbPath);
-    
+
+    // busy_timeout: 다른 프로세스가 DB 잠금 시 최대 5초 대기
+    db.pragma('busy_timeout = 5000');
     // WAL 모드 활성화
     db.pragma('journal_mode = WAL');
     db.pragma('synchronous = NORMAL');
-    
+
     // 테이블 생성
     db.exec(`
       CREATE TABLE IF NOT EXISTS offline_users (
@@ -153,20 +170,22 @@ export function closeOfflineDb(): void {
 
 /**
  * 현재 DB 연결 가져오기
+ * 클라우드 환경에서는 null 반환 (SQLite 미사용)
  */
-function getDb(): Database.Database {
-  if (!db) {
+function getDb(): Database.Database | null {
+  if (!db && !isCloudEnvironment()) {
     initOfflineDb();
   }
-  return db!;
+  return db;
 }
 
 /**
  * 이메일로 사용자 조회
  */
 export function getOfflineUser(email: string): OfflineUserRecord | null {
-  const db = getDb();
-  const stmt = db.prepare('SELECT * FROM offline_users WHERE email = ?');
+  const database = getDb();
+  if (!database) return null;
+  const stmt = database.prepare('SELECT * FROM offline_users WHERE email = ?');
   const user = stmt.get(email) as OfflineUserRecord | undefined;
   return user ?? null;
 }
@@ -175,8 +194,9 @@ export function getOfflineUser(email: string): OfflineUserRecord | null {
  * ID로 사용자 조회
  */
 export function getOfflineUserById(id: string): OfflineUserRecord | null {
-  const db = getDb();
-  const stmt = db.prepare('SELECT * FROM offline_users WHERE id = ?');
+  const database = getDb();
+  if (!database) return null;
+  const stmt = database.prepare('SELECT * FROM offline_users WHERE id = ?');
   const user = stmt.get(id) as OfflineUserRecord | undefined;
   return user ?? null;
 }
@@ -185,8 +205,9 @@ export function getOfflineUserById(id: string): OfflineUserRecord | null {
  * 기기 ID로 사용자 조회 (P-46)
  */
 export function getOfflineUserByMachineId(machineId: string): OfflineUserRecord | null {
-  const db = getDb();
-  const stmt = db.prepare('SELECT * FROM offline_users WHERE machineId = ?');
+  const database = getDb();
+  if (!database) return null;
+  const stmt = database.prepare('SELECT * FROM offline_users WHERE machineId = ?');
   const user = stmt.get(machineId) as OfflineUserRecord | undefined;
   return user ?? null;
 }
@@ -195,8 +216,9 @@ export function getOfflineUserByMachineId(machineId: string): OfflineUserRecord 
  * 모든 사용자 조회
  */
 export function getAllOfflineUsers(): OfflineUserRecord[] {
-  const db = getDb();
-  const stmt = db.prepare('SELECT * FROM offline_users WHERE isActive = 1 ORDER BY createdAt DESC');
+  const database = getDb();
+  if (!database) return [];
+  const stmt = database.prepare('SELECT * FROM offline_users WHERE isActive = 1 ORDER BY createdAt DESC');
   return stmt.all() as OfflineUserRecord[];
 }
 
@@ -212,9 +234,10 @@ export function saveOfflineUser(
     createdAt?: string;
     passwordHash?: string;  // 미제공 시 '' (라이선스 전용 계정)
   }
-): OfflineUserRecord {
-  const db = getDb();
-  
+): OfflineUserRecord | null {
+  const database = getDb();
+  if (!database) return null;
+
   const id = user.id || generateId();
   const now = new Date().toISOString();
   const passwordHash = user.passwordHash ?? '';  // 미제공 시 빈 문자열
@@ -222,7 +245,7 @@ export function saveOfflineUser(
     
   if (existing) {
     // 업데이트
-    const stmt = db.prepare(`
+    const stmt = database.prepare(`
       UPDATE offline_users
       SET 
         name = ?,
@@ -275,7 +298,7 @@ export function saveOfflineUser(
     return getOfflineUser(user.email)!;
   } else {
     // 삽입
-    const stmt = db.prepare(`
+    const stmt = database.prepare(`
       INSERT INTO offline_users (
         id, email, name, organization, passwordHash, role,
         machineId, lastMachineId, licenseStatus, licenseExpiresAt,
@@ -362,9 +385,10 @@ export async function verifyOfflinePassword(
         if (!isValid) {
             const failedCount = (user.failedLoginAttempts ?? 0) + 1;
             const shouldLock = failedCount >= 5;
-            
-            const db = getDb();
-            const updateStmt = db.prepare(`
+
+            const database = getDb();
+            if (!database) return null;
+            const updateStmt = database.prepare(`
                 UPDATE offline_users
                 SET 
                     failedLoginAttempts = ?,
@@ -385,8 +409,9 @@ export async function verifyOfflinePassword(
         }
         
         // ✅ 로그인 성공 - 실패 횟수 초기화
-        const db = getDb();
-        const successStmt = db.prepare(`
+        const database2 = getDb();
+        if (!database2) return null;
+        const successStmt = database2.prepare(`
             UPDATE offline_users
             SET 
                 failedLoginAttempts = 0,
@@ -421,13 +446,14 @@ export function updateLicenseStatus(
   status: 'valid' | 'expired' | 'pending' | 'none',
   expiresAt?: string
 ): void {
-  const db = getDb();
-  const stmt = db.prepare(`
+  const database = getDb();
+  if (!database) return;
+  const stmt = database.prepare(`
     UPDATE offline_users
     SET licenseStatus = ?, licenseExpiresAt = ?, updatedAt = ?
     WHERE email = ?
   `);
-  
+
   stmt.run(status, expiresAt ?? null, new Date().toISOString(), email);
 }
 
@@ -435,11 +461,12 @@ export function updateLicenseStatus(
  * 오프라인 모드 상태 업데이트
  */
 export function updateOfflineModeStatus(email: string, isOffline: boolean, machineId?: string): void {
-  const db = getDb();
-  
-  const stmt = db.prepare(`
+  const database = getDb();
+  if (!database) return;
+
+  const stmt = database.prepare(`
     UPDATE offline_users
-    SET 
+    SET
       isInOfflineMode = ?,
       offlineStartedAt = ?,
       machineId = ?,
@@ -448,7 +475,7 @@ export function updateOfflineModeStatus(email: string, isOffline: boolean, machi
       updatedAt = ?
     WHERE email = ?
   `);
-  
+
   stmt.run(
     isOffline ? 1 : 0,
     isOffline ? new Date().toISOString() : null,
@@ -464,13 +491,14 @@ export function updateOfflineModeStatus(email: string, isOffline: boolean, machi
  * 동기화 시간 업데이트
  */
 export function updateSyncTime(email: string): void {
-  const db = getDb();
-  const stmt = db.prepare(`
+  const database = getDb();
+  if (!database) return;
+  const stmt = database.prepare(`
     UPDATE offline_users
     SET lastSyncAt = ?, updatedAt = ?
     WHERE email = ?
   `);
-  
+
   stmt.run(new Date().toISOString(), new Date().toISOString(), email);
 }
 
@@ -478,8 +506,9 @@ export function updateSyncTime(email: string): void {
  * 사용자 삭제
  */
 export function deleteOfflineUser(email: string): boolean {
-  const db = getDb();
-  const stmt = db.prepare('DELETE FROM offline_users WHERE email = ?');
+  const database = getDb();
+  if (!database) return false;
+  const stmt = database.prepare('DELETE FROM offline_users WHERE email = ?');
   const result = stmt.run(email);
   return result.changes > 0;
 }
@@ -488,13 +517,14 @@ export function deleteOfflineUser(email: string): boolean {
  * 사용자 비활성화
  */
 export function deactivateOfflineUser(email: string): void {
-  const db = getDb();
-  const stmt = db.prepare(`
+  const database = getDb();
+  if (!database) return;
+  const stmt = database.prepare(`
     UPDATE offline_users
     SET isActive = 0, updatedAt = ?
     WHERE email = ?
   `);
-  
+
   stmt.run(new Date().toISOString(), email);
 }
 
@@ -505,6 +535,7 @@ export function deactivateOfflineUser(email: string): void {
  */
 export function getOfflineConfig(userId: string, key: string): string | null {
   const database = getDb();
+  if (!database) return null;
   const row = database.prepare(
     'SELECT value FROM user_configs WHERE userId = ? AND key = ?'
   ).get(userId, key) as { value: string } | undefined;
@@ -516,6 +547,7 @@ export function getOfflineConfig(userId: string, key: string): string | null {
  */
 export function saveOfflineConfig(userId: string, key: string, value: string): void {
   const database = getDb();
+  if (!database) return;
   const now = new Date().toISOString();
   const id = `${userId}:${key}`;
   database.prepare(`
@@ -530,6 +562,7 @@ export function saveOfflineConfig(userId: string, key: string, value: string): v
  */
 export function deleteOfflineConfig(userId: string, key: string): void {
   const database = getDb();
+  if (!database) return;
   database.prepare('DELETE FROM user_configs WHERE userId = ? AND key = ?').run(userId, key);
 }
 
@@ -544,7 +577,8 @@ export function saveLicenseUser(params: {
   email: string;
   name?: string;
   org?: string;
-}): string {
+}): string | null {
+  if (isCloudEnvironment()) return null;
   const existing = getOfflineUser(params.email);
   if (existing) return existing.id;
 
@@ -577,14 +611,15 @@ export function getOfflineDbStats(): {
   usersWithLicense: number;
   usersInOfflineMode: number;
 } {
-  const db = getDb();
-  
-  const totalStmt = db.prepare('SELECT COUNT(*) as count FROM offline_users');
-  const activeStmt = db.prepare('SELECT COUNT(*) as count FROM offline_users WHERE isActive = 1');
-  const lockedStmt = db.prepare('SELECT COUNT(*) as count FROM offline_users WHERE lockedUntil IS NOT NULL AND lockedUntil > datetime("now")');
-  const licenseStmt = db.prepare('SELECT COUNT(*) as count FROM offline_users WHERE licenseStatus IS NOT NULL AND licenseStatus != "none"');
-  const offlineStmt = db.prepare('SELECT COUNT(*) as count FROM offline_users WHERE isInOfflineMode = 1');
-  
+  const database = getDb();
+  if (!database) return { totalUsers: 0, activeUsers: 0, lockedUsers: 0, usersWithLicense: 0, usersInOfflineMode: 0 };
+
+  const totalStmt = database.prepare('SELECT COUNT(*) as count FROM offline_users');
+  const activeStmt = database.prepare('SELECT COUNT(*) as count FROM offline_users WHERE isActive = 1');
+  const lockedStmt = database.prepare('SELECT COUNT(*) as count FROM offline_users WHERE lockedUntil IS NOT NULL AND lockedUntil > datetime("now")');
+  const licenseStmt = database.prepare('SELECT COUNT(*) as count FROM offline_users WHERE licenseStatus IS NOT NULL AND licenseStatus != "none"');
+  const offlineStmt = database.prepare('SELECT COUNT(*) as count FROM offline_users WHERE isInOfflineMode = 1');
+
   return {
     totalUsers: (totalStmt.get() as { count: number }).count,
     activeUsers: (activeStmt.get() as { count: number }).count,
