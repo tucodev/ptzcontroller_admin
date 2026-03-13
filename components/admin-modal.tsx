@@ -203,22 +203,31 @@ export default function AdminModal({ onClose }: AdminModalProps) {
   }
 
   async function saveCloudUrl() {
+    const urlVal = cloudUrlInput.trim() || null;
+    // Cloud URL 설정/변경 시 버전 입력 필수
+    if (urlVal && !latestVersion.trim()) {
+      setFileMsg({ type: 'err', text: 'Cloud URL 등록 시 아래 "최신 Proxy 버전"을 함께 입력해야 합니다.' });
+      return;
+    }
+
     setCloudUrlSaving(true);
     setFileMsg(null);
     try {
+      // Cloud URL과 버전을 함께 저장
+      const body: Record<string, string | null> = { cloudDownloadUrl: urlVal };
+      if (latestVersion.trim()) body.latestVersion = latestVersion.trim();
+
       const res = await fetch('/api/admin/proxy-file', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cloudDownloadUrl: cloudUrlInput.trim() || null }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) { setFileMsg({ type: 'err', text: data.error ?? 'Failed' }); return; }
       setCloudDownloadUrl(data.cloudDownloadUrl ?? null);
-      if (data.cloudDownloadUrl && !latestVersion.trim()) {
-        setFileMsg({ type: 'ok', text: 'Cloud Download URL 저장됨. ⚠️ 최신 Proxy 버전을 함께 입력해 주세요.' });
-      } else {
-        setFileMsg({ type: 'ok', text: 'Cloud Download URL 저장됨.' });
-      }
+      setFileMsg({ type: 'ok', text: urlVal
+        ? `Cloud URL 저장됨 (v${latestVersion.trim()}).`
+        : 'Cloud Download URL이 해제되었습니다.' });
     } finally {
       setCloudUrlSaving(false);
     }
@@ -253,12 +262,20 @@ export default function AdminModal({ onClose }: AdminModalProps) {
       const res = await fetch('/api/admin/proxy-file', { method: 'POST', body: formData });
       const data = await res.json();
       if (!res.ok) { setFileMsg({ type: 'err', text: data.error ?? 'Upload failed' }); return; }
-      setFileMsg({ type: 'ok', text: `"${data.filename}" 업로드 완료.` });
-      // 파일명에서 버전 추출 시도 (예: PTZ-Proxy-Portable-1.0.2.exe → 1.0.2)
+      // 파일명에서 버전 추출 시도 (예: PTZ-Proxy-Portable-1.0.3.exe → 1.0.3)
       const verMatch = data.filename.match(/(\d+\.\d+\.\d+)/);
-      if (verMatch && !latestVersion.trim()) {
-        setLatestVersion(verMatch[1]);
-        setFileMsg({ type: 'ok', text: `"${data.filename}" 업로드 완료. 버전 ${verMatch[1]} 감지 — 아래에서 확인 후 저장해 주세요.` });
+      const detectedVer = verMatch?.[1] || latestVersion.trim();
+      if (detectedVer) {
+        // 감지된 버전을 자동 저장
+        await fetch('/api/admin/proxy-file', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ latestVersion: detectedVer }),
+        });
+        setLatestVersion(detectedVer);
+        setFileMsg({ type: 'ok', text: `"${data.filename}" 업로드 완료. 최신 버전 v${detectedVer} 자동 등록됨.` });
+      } else {
+        setFileMsg({ type: 'ok', text: `"${data.filename}" 업로드 완료. ⚠️ 버전을 감지할 수 없습니다 — 아래에서 직접 입력해 주세요.` });
       }
       fetchProxyFiles();
     } finally {
