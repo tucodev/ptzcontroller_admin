@@ -214,7 +214,11 @@ export default function AdminModal({ onClose }: AdminModalProps) {
       const data = await res.json();
       if (!res.ok) { setFileMsg({ type: 'err', text: data.error ?? 'Failed' }); return; }
       setCloudDownloadUrl(data.cloudDownloadUrl ?? null);
-      setFileMsg({ type: 'ok', text: 'Cloud Download URL 저장됨.' });
+      if (data.cloudDownloadUrl && !latestVersion.trim()) {
+        setFileMsg({ type: 'ok', text: 'Cloud Download URL 저장됨. ⚠️ 최신 Proxy 버전을 함께 입력해 주세요.' });
+      } else {
+        setFileMsg({ type: 'ok', text: 'Cloud Download URL 저장됨.' });
+      }
     } finally {
       setCloudUrlSaving(false);
     }
@@ -249,7 +253,13 @@ export default function AdminModal({ onClose }: AdminModalProps) {
       const res = await fetch('/api/admin/proxy-file', { method: 'POST', body: formData });
       const data = await res.json();
       if (!res.ok) { setFileMsg({ type: 'err', text: data.error ?? 'Upload failed' }); return; }
-      setFileMsg({ type: 'ok', text: `"${data.filename}" uploaded successfully.` });
+      setFileMsg({ type: 'ok', text: `"${data.filename}" 업로드 완료.` });
+      // 파일명에서 버전 추출 시도 (예: PTZ-Proxy-Portable-1.0.2.exe → 1.0.2)
+      const verMatch = data.filename.match(/(\d+\.\d+\.\d+)/);
+      if (verMatch && !latestVersion.trim()) {
+        setLatestVersion(verMatch[1]);
+        setFileMsg({ type: 'ok', text: `"${data.filename}" 업로드 완료. 버전 ${verMatch[1]} 감지 — 아래에서 확인 후 저장해 주세요.` });
+      }
       fetchProxyFiles();
     } finally {
       setUploading(false);

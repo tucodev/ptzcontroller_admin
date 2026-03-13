@@ -137,7 +137,14 @@ export async function PATCH(request: NextRequest) {
 
     // cloudDownloadUrl이 전달되었으면 업데이트
     if (cloudDownloadUrl !== undefined) {
+      const prevUrl = config.cloudDownloadUrl;
       config.cloudDownloadUrl = url || null;
+      // URL이 실제로 변경된 경우 → 새 파일 배포로 간주
+      if (url !== prevUrl) {
+        config.updatedAt = new Date().toISOString();
+        // 로컬 파일 hash는 cloud 파일과 무관하므로 초기화
+        config.fileHash = null;
+      }
     }
     // latestVersion이 전달되었으면 업데이트
     if (latestVersion !== undefined) {
