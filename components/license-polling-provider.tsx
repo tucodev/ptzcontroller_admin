@@ -44,6 +44,20 @@ export const useLicensePolling = () => useContext(LicensePollingContext);
 // ── 상수 ──────────────────────────────────────────────────────
 const POLL_MS = 30_000;
 const LS_KEY = 'ptz_lic_reqid';
+const LS_RESULT_KEY = 'ptz_lic_result'; // 승인/거절 결과 보존용
+
+// ── Proxy 포트 가져오기 (settings API → 기본 9902) ──
+async function getProxyPort(): Promise<number> {
+  try {
+    const res = await fetch('/api/config/settings');
+    if (res.ok) {
+      const data = await res.json();
+      const port = data?.settings?.proxyPort;
+      if (port && typeof port === 'number') return port;
+    }
+  } catch { /* ignore */ }
+  return 9902;
+}
 
 // ── Provider ──────────────────────────────────────────────────
 export function LicensePollingProvider({ children }: { children: React.ReactNode }) {
@@ -55,15 +69,30 @@ export function LicensePollingProvider({ children }: { children: React.ReactNode
   const [expiresAt, setExpiresAt] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── 마운트 시 localStorage에서 requestId 복원 ──────────────
+  // ── 마운트 시 localStorage에서 상태 복원 ──────────────────
   useEffect(() => {
     if (!session?.user) return;
+
+    // 1) pending 요청이 남아있으면 polling 재개
     const savedId = localStorage.getItem(LS_KEY);
     if (savedId) {
       setPendingRequestId(savedId);
       setLicenseStatus('pending');
       setLicenseMessage('관리자 승인을 기다리는 중입니다. 다른 페이지로 이동해도 승인 시 자동으로 알려드립니다.');
       beginPolling(savedId);
+      return;
+    }
+
+    // 2) 승인/거절 결과가 남아있으면 배너 복원
+    const savedResult = localStorage.getItem(LS_RESULT_KEY);
+    if (savedResult) {
+      try {
+        const result = JSON.parse(savedResult);
+        setLicenseStatus(result.status);
+        setLicenseMessage(result.message);
+        setLicenseB64(result.license || '');
+        setExpiresAt(result.expiresAt || '');
+      } catch { localStorage.removeItem(LS_RESULT_KEY); }
     }
   }, [session?.user]);
 
@@ -73,6 +102,13 @@ export function LicensePollingProvider({ children }: { children: React.ReactNode
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, []);
+
+  // ── 결과를 localStorage에 보존 ─────────────────────────────
+  const persistResult = (status: LicensePollingStatus, message: string, license = '', exp = '') => {
+    localStorage.setItem(LS_RESULT_KEY, JSON.stringify({
+      status, message, license, expiresAt: exp,
+    }));
+  };
 
   // ── Proxy를 통한 라이선스 저장 ─────────────────────────────
   const saveViaProxy = async (license: string): Promise<boolean> => {
@@ -86,9 +122,9 @@ export function LicensePollingProvider({ children }: { children: React.ReactNode
       if (local.ok) return true;
     } catch { /* 클라우드 환경이면 서버 경로가 무의미 → 무시 */ }
 
-    // 2차: PTZ Proxy API 시도 (localhost:3002)
+    // 2차: PTZ Proxy API 시도 (설정의 proxyPort 사용)
     try {
-      const proxyPort = localStorage.getItem('ptz_proxy_port') || '3002';
+      const proxyPort = await getProxyPort();
       const proxy = await fetch(`http://localhost:${proxyPort}/api/license/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -126,20 +162,26 @@ export function LicensePollingProvider({ children }: { children: React.ReactNode
           if (saved) {
             setLicenseStatus('approved');
             setLicenseMessage('라이선스가 승인되어 자동 적용되었습니다!');
+            persistResult('approved', '라이선스가 승인되어 자동 적용되었습니다!', data.license, data.expiresAt);
           } else {
             setLicenseStatus('approved_no_proxy');
-            setLicenseMessage('라이선스가 승인되었으나, PTZ Proxy가 실행 중이 아니어서 자동 적용할 수 없습니다.');
+            const msg = 'PTZ Proxy를 실행하여야 라이선스를 적용할 수 있습니다. PTZ Proxy를 실행하고 재시도하십시오.';
+            setLicenseMessage(msg);
+            persistResult('approved_no_proxy', msg, data.license, data.expiresAt);
           }
         } else {
           setLicenseStatus('approved');
           setLicenseMessage('라이선스가 승인되었습니다!');
+          persistResult('approved', '라이선스가 승인되었습니다!');
         }
       } else if (data.status === 'rejected') {
         if (pollRef.current) clearInterval(pollRef.current);
         localStorage.removeItem(LS_KEY);
         setPendingRequestId(null);
+        const msg = data.note || '요청이 거절되었습니다. 관리자에게 문의하세요.';
         setLicenseStatus('rejected');
-        setLicenseMessage(data.note || '요청이 거절되었습니다. 관리자에게 문의하세요.');
+        setLicenseMessage(msg);
+        persistResult('rejected', msg);
       }
       // pending → 다음 poll 대기
     } catch {
@@ -150,6 +192,7 @@ export function LicensePollingProvider({ children }: { children: React.ReactNode
   // ── 외부 API ───────────────────────────────────────────────
   const startPolling = useCallback((requestId: string) => {
     localStorage.setItem(LS_KEY, requestId);
+    localStorage.removeItem(LS_RESULT_KEY); // 이전 결과 제거
     setPendingRequestId(requestId);
     setLicenseStatus('pending');
     setLicenseMessage('관리자 승인을 기다리는 중입니다. 다른 페이지로 이동해도 승인 시 자동으로 알려드립니다.');
@@ -164,6 +207,7 @@ export function LicensePollingProvider({ children }: { children: React.ReactNode
     setLicenseB64(b64);
     setExpiresAt(exp);
     setLicenseMessage('라이선스가 승인되었습니다!');
+    persistResult('approved', '라이선스가 승인되었습니다!', b64, exp);
   }, []);
 
   const retrySaveViaProxy = useCallback(async () => {
@@ -172,10 +216,14 @@ export function LicensePollingProvider({ children }: { children: React.ReactNode
     if (saved) {
       setLicenseStatus('approved');
       setLicenseMessage('라이선스가 적용되었습니다!');
+      persistResult('approved', '라이선스가 적용되었습니다!');
+      localStorage.removeItem(LS_RESULT_KEY); // 성공 시 결과 제거
     } else {
-      setLicenseMessage('PTZ Proxy를 실행하여야 라이선스를 적용할 수 있습니다. PTZ Proxy를 실행하고 재시도하십시오.');
+      const msg = 'PTZ Proxy를 실행하여야 라이선스를 적용할 수 있습니다. PTZ Proxy를 실행하고 재시도하십시오.';
+      setLicenseMessage(msg);
+      persistResult('approved_no_proxy', msg, licenseB64, expiresAt);
     }
-  }, [licenseB64]);
+  }, [licenseB64, expiresAt]);
 
   const dismissNotification = useCallback(() => {
     // approved/rejected 알림만 dismiss (pending은 유지)
@@ -183,6 +231,7 @@ export function LicensePollingProvider({ children }: { children: React.ReactNode
       setLicenseStatus('none');
       setLicenseMessage('');
       setLicenseB64('');
+      localStorage.removeItem(LS_RESULT_KEY);
     }
   }, [licenseStatus]);
 
