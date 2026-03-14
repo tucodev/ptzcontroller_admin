@@ -140,6 +140,65 @@ export async function sendResetLinkEmail(
     }
 }
 
+// ─── 라이선스 요청 알림 (관리자에게) ──────────────────────────────
+
+export async function sendLicenseRequestNotifyEmail(
+    adminEmails: string[],
+    requester: { name: string; email: string; org: string; machineId: string },
+): Promise<{ success: boolean; error?: string }> {
+    if (adminEmails.length === 0) return { success: true };
+    try {
+        const transporter = createTransporter();
+
+        const licenseServerUrl =
+            process.env.LICENSE_SERVER_URL || "http://localhost:4000";
+
+        await transporter.sendMail({
+            from: SMTP_FROM,
+            to: adminEmails.join(","),
+            subject: "[PTZ Controller] 새 오프라인 라이선스 요청",
+            html: `
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+          <h2 style="color: #1a1a2e; margin-bottom: 16px;">오프라인 라이선스 요청</h2>
+          <p style="color: #444; line-height: 1.6;">
+            새로운 오프라인 라이선스 요청이 접수되었습니다.
+          </p>
+          <div style="background: #f0f4ff; border: 1px solid #d0d8f0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+            <table style="width: 100%; font-size: 14px; color: #333;">
+              <tr><td style="padding: 4px 8px; color: #666;">이름</td><td style="padding: 4px 8px; font-weight: 600;">${requester.name || '(미입력)'}</td></tr>
+              <tr><td style="padding: 4px 8px; color: #666;">이메일</td><td style="padding: 4px 8px; font-weight: 600;">${requester.email}</td></tr>
+              <tr><td style="padding: 4px 8px; color: #666;">소속</td><td style="padding: 4px 8px; font-weight: 600;">${requester.org || '(미입력)'}</td></tr>
+              <tr><td style="padding: 4px 8px; color: #666;">머신 ID</td><td style="padding: 4px 8px; font-family: 'Courier New', monospace; font-size: 11px; word-break: break-all;">${requester.machineId}</td></tr>
+              <tr><td style="padding: 4px 8px; color: #666;">요청 시간</td><td style="padding: 4px 8px;">${new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</td></tr>
+            </table>
+          </div>
+          <div style="text-align: center; margin: 28px 0;">
+            <a href="${licenseServerUrl}"
+               style="display: inline-block; background: #3b82f6; color: #fff; text-decoration: none;
+                      padding: 12px 32px; border-radius: 8px; font-weight: 600; font-size: 15px;">
+              라이선스 관리 페이지
+            </a>
+          </div>
+          <p style="color: #888; font-size: 12px; line-height: 1.5;">
+            위 버튼을 클릭하여 라이선스 서버에서 요청을 승인 또는 거절할 수 있습니다.
+          </p>
+        </div>
+      `,
+        });
+
+        return { success: true };
+    } catch (err) {
+        console.error("[Email] sendLicenseRequestNotifyEmail error:", err);
+        return {
+            success: false,
+            error:
+                err instanceof Error
+                    ? err.message
+                    : "이메일 발송에 실패했습니다.",
+        };
+    }
+}
+
 // ─── 임시 비밀번호 생성 ────────────────────────────────────────
 
 /** 12자 랜덤 비밀번호 (영대소문자 + 숫자 + 특수문자) */

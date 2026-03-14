@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Settings, Loader2, Save, Moon, Sun, Monitor,
@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { AppSettings } from '@/lib/types';
+import { useLicensePolling } from '@/components/license-polling-provider';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -40,8 +41,7 @@ interface ConfirmInfo {
   fromProxy:  boolean; // true: ptz-proxy에서 수집, false: 서버 측 HW ID 사용
 }
 
-const POLL_MS = 30_000;          // 폴링 간격 30초
-const LS_KEY  = 'ptz_lic_reqid'; // localStorage: requestId 저장 키
+// polling 간격 및 localStorage 키는 license-polling-provider.tsx 에서 전역 관리
 
 
 export default function SettingsModal({ onClose }: SettingsModalProps) {
@@ -61,7 +61,9 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     expiresAt: '', machineId: '', licenseB64: '',
   });
   const [savingFile, setSavingFile] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 전역 polling context (페이지 이동해도 polling 유지)
+  const { startPolling: globalStartPolling, setApproved: globalSetApproved,
+          licenseStatus: globalLicStatus, pendingRequestId: globalReqId } = useLicensePolling();
 
   // ── Proxy 실행 상태 (idle 상태 버튼 제어) ─────────────────
   // 'checking': 확인 중 | 'running': 실행 중 | 'stopped': 미실행
@@ -77,8 +79,14 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     checkExistingLicense();
   }, []);
 
-  // 언마운트 시 폴링 정리
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+  // 전역 context에서 승인/거절 감지 → 로컬 상태 동기화
+  useEffect(() => {
+    if (globalLicStatus === 'approved' || globalLicStatus === 'approved_no_proxy') {
+      setLic(prev => ({ ...prev, status: 'approved', message: '라이선스가 승인되었습니다!' }));
+    } else if (globalLicStatus === 'rejected') {
+      setLic(prev => ({ ...prev, status: 'rejected', message: '요청이 거절되었습니다. 관리자에게 문의하세요.' }));
+    }
+  }, [globalLicStatus]);
 
   useEffect(() => {
     if (currentTheme && settings.theme !== currentTheme) {
@@ -98,42 +106,12 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
         setLic(prev => ({ ...prev, status: 'approved', expiresAt: data.expiresAt }));
         return;
       }
-      // 2. 이전에 저장한 requestId 로 폴링 복원
-      const savedId = localStorage.getItem(LS_KEY);
-      if (savedId) {
-        setLic(prev => ({ ...prev, status: 'pending', requestId: savedId,
-          message: '관리자 승인을 기다리는 중입니다...' }));
-        startPolling(savedId);
+      // 2. 전역 context에서 pending 상태 확인 (이미 polling 중)
+      if (globalReqId) {
+        setLic(prev => ({ ...prev, status: 'pending', requestId: globalReqId,
+          message: '관리자 승인을 기다리는 중입니다. 이 화면을 닫거나 다른 페이지로 이동해도 승인 시 자동으로 알려드립니다.' }));
       }
     } catch { /* 오프라인 환경 등에서 무시 */ }
-  };
-
-  // ── 폴링 ─────────────────────────────────────────────────
-  const startPolling = (requestId: string) => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(() => doPoll(requestId), POLL_MS);
-  };
-
-  const doPoll = async (requestId: string) => {
-    try {
-      const res  = await fetch(`/api/license/poll?requestId=${requestId}`);
-      const data = await res.json();
-
-      if (data.status === 'approved') {
-        clearInterval(pollRef.current!);
-        localStorage.removeItem(LS_KEY);
-        // 승인 즉시 공유 경로에 자동 저장
-        if (data.license) await autoSaveLicense(data.license);
-        setLic(prev => ({ ...prev, status: 'approved',
-          expiresAt: data.expiresAt, licenseB64: data.license ?? '',
-          message: '라이선스의 발급이 완료되었습니다!' }));
-      } else if (data.status === 'rejected') {
-        clearInterval(pollRef.current!);
-        localStorage.removeItem(LS_KEY);
-        setLic(prev => ({ ...prev, status: 'rejected',
-          message: data.note || '요청이 거절되었습니다. 관리자에게 문의하세요.' }));
-      }
-    } catch { /* 네트워크 오류는 다음 폴링 때 재시도 */ }
   };
 
   // ── 1단계: 정보 수집 후 확인 다이얼로그 표시 ─────────────
@@ -222,16 +200,17 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
       if (data.status === 'approved') {
         // 발급 즉시 공유 경로에 자동 저장
         if (data.license) await autoSaveLicense(data.license);
+        globalSetApproved(data.license ?? '', data.expiresAt ?? '');
         setLic(prev => ({ ...prev, status: 'approved',
           expiresAt: data.expiresAt, machineId: data.machineId ?? '',
           licenseB64: data.license ?? '', message: '라이선스가 즉시 발급되었습니다!' }));
       } else {
         const reqId = data.requestId ?? '';
-        localStorage.setItem(LS_KEY, reqId);
+        // 전역 context로 polling 시작 (설정 모달을 닫아도 polling 유지)
+        globalStartPolling(reqId);
         setLic(prev => ({ ...prev, status: 'pending', requestId: reqId,
           machineId: data.machineId ?? '',
-          message: data.message ?? '관리자 승인을 기다리는 중입니다...' }));
-        startPolling(reqId);
+          message: '관리자 승인을 기다리는 중입니다. 이 화면을 닫거나 다른 페이지로 이동해도 승인 시 자동으로 알려드립니다.' }));
       }
     } catch {
       setLic(prev => ({ ...prev, status: 'error', message: '라이선스 서버에 연결할 수 없습니다' }));
@@ -534,12 +513,27 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
             <p className="text-xs text-muted-foreground mt-0.5">{message}</p>
             {machineId && <p className="text-xs font-mono text-muted-foreground mt-1 truncate">Machine ID: {machineId}</p>}
           </div>
-          <button onClick={() => doPoll(requestId)} title="지금 확인"
+          <button onClick={() => {
+            // 전역 context가 polling 중이므로 수동 확인은 fetch 1회 호출
+            fetch(`/api/license/poll?requestId=${requestId}`)
+              .then(r => r.json())
+              .then(d => {
+                if (d.status === 'approved') {
+                  globalSetApproved(d.license ?? '', d.expiresAt ?? '');
+                  if (d.license) autoSaveLicense(d.license);
+                  setLic(prev => ({ ...prev, status: 'approved', expiresAt: d.expiresAt,
+                    licenseB64: d.license ?? '', message: '라이선스가 승인되었습니다!' }));
+                } else if (d.status === 'rejected') {
+                  setLic(prev => ({ ...prev, status: 'rejected',
+                    message: d.note || '요청이 거절되었습니다.' }));
+                }
+              }).catch(() => {});
+          }} title="지금 확인"
             className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground shrink-0">
             <RefreshCw className="w-4 h-4" />
           </button>
         </div>
-        <p className="text-xs text-muted-foreground text-center">30초마다 자동으로 확인합니다</p>
+        <p className="text-xs text-muted-foreground text-center">30초마다 자동으로 확인합니다. 이 화면을 닫아도 됩니다.</p>
 
         {/* 새 요청 버튼 (확인 다이얼로그 경유) */}
         <button onClick={handleInitiateRequest}

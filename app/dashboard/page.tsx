@@ -17,6 +17,7 @@ import AdminModal from "@/components/admin-modal";
 import ProfileModal from "@/components/profile-modal";
 import HexMonitor, { HexLogEntry } from "@/components/hex-monitor";
 import { CameraConfig, PTZCommand } from "@/lib/types";
+import { useLicensePolling } from "@/components/license-polling-provider";
 
 export default function DashboardPage() {
     const { data: session, status } = useSession() ?? {};
@@ -56,6 +57,11 @@ export default function DashboardPage() {
 
     // ── 오프라인 모드 ──────────────────────────────────────────
     const [isOfflineMode, setIsOfflineMode] = useState(false);
+
+    // ── 라이선스 요청 전역 polling ───────────────────────────
+    const { licenseStatus: licPollingStatus, licenseMessage: licPollingMsg,
+            licenseB64: licPollingB64, dismissNotification: dismissLicNotify,
+            retrySaveViaProxy } = useLicensePolling();
 
     // ── 라이선스 상태 (헤더 뱃지용) ───────────────────────────
     const [isLicensed, setIsLicensed]       = useState(false);
@@ -513,6 +519,69 @@ export default function DashboardPage() {
                             onClick={() => setProxyUpdateDismissed(true)}
                             className="p-1 hover:bg-blue-500/20 rounded transition-colors text-blue-500"
                             title="이 세션에서 숨기기"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* 라이선스 승인 배너 — 자동 적용 완료 */}
+            {licPollingStatus === 'approved' && (
+                <div className="bg-green-500/10 border-b border-green-500/30 px-4 py-2">
+                    <div className="max-w-7xl mx-auto flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                            <ShieldCheck className="w-4 h-4 shrink-0" />
+                            <span>{licPollingMsg}</span>
+                        </div>
+                        <button
+                            onClick={dismissLicNotify}
+                            className="p-1 hover:bg-green-500/20 rounded transition-colors text-green-500"
+                            title="닫기"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* 라이선스 승인 배너 — Proxy 미실행으로 적용 불가 */}
+            {licPollingStatus === 'approved_no_proxy' && (
+                <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2">
+                    <div className="max-w-7xl mx-auto flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                            <AlertTriangle className="w-4 h-4 shrink-0" />
+                            <span>{licPollingMsg}</span>
+                            <button
+                                onClick={retrySaveViaProxy}
+                                className="ml-2 px-3 py-0.5 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium transition-colors"
+                            >
+                                라이선스 적용
+                            </button>
+                        </div>
+                        <button
+                            onClick={dismissLicNotify}
+                            className="p-1 hover:bg-amber-500/20 rounded transition-colors text-amber-500"
+                            title="닫기"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* 라이선스 거절 배너 */}
+            {licPollingStatus === 'rejected' && (
+                <div className="bg-red-500/10 border-b border-red-500/30 px-4 py-2">
+                    <div className="max-w-7xl mx-auto flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+                            <AlertTriangle className="w-4 h-4 shrink-0" />
+                            <span>{licPollingMsg}</span>
+                        </div>
+                        <button
+                            onClick={dismissLicNotify}
+                            className="p-1 hover:bg-red-500/20 rounded transition-colors text-red-500"
+                            title="닫기"
                         >
                             <X className="w-4 h-4" />
                         </button>

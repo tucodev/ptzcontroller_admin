@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getAllMachineIds } from '@/lib/license';
+import { isSmtpConfigured, sendLicenseRequestNotifyEmail } from '@/lib/email';
 
 export const dynamic = 'force-dynamic';
 
@@ -101,6 +102,28 @@ export async function POST(request: NextRequest) {
 //    if (data.status === 'approved' && data.license) {
 //      saveLicenseLocally(data.license);
 //    }
+
+    // pending 상태 → 관리자에게 이메일 알림 (fire-and-forget)
+    if (data.status === 'pending' && isSmtpConfigured()) {
+      (async () => {
+        try {
+          const { prisma } = await import('@/lib/db');
+          const admins = await prisma.user.findMany({
+            where: { role: 'admin' },
+            select: { email: true },
+          });
+          const adminEmails = admins.map((a: { email: string }) => a.email).filter(Boolean);
+          if (adminEmails.length > 0) {
+            await sendLicenseRequestNotifyEmail(adminEmails, {
+              name: userName, email: userEmail, org: userOrg, machineId,
+            });
+            console.log('[LicenseRequest] Admin notification sent to:', adminEmails.join(', '));
+          }
+        } catch (e) {
+          console.error('[LicenseRequest] Admin notification failed:', e);
+        }
+      })();
+    }
 
     return NextResponse.json({ ...data, machineId });
   } catch (err) {
