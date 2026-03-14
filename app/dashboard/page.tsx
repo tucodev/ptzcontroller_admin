@@ -526,6 +526,16 @@ export default function DashboardPage() {
                 </div>
             )}
 
+            {/* 라이선스 승인 대기 배너 */}
+            {licPollingStatus === 'pending' && (
+                <div className="bg-blue-500/10 border-b border-blue-500/30 px-4 py-2">
+                    <div className="max-w-7xl mx-auto flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400">
+                        <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+                        <span>{licPollingMsg}</span>
+                    </div>
+                </div>
+            )}
+
             {/* 라이선스 승인 배너 — 자동 적용 완료 */}
             {licPollingStatus === 'approved' && (
                 <div className="bg-green-500/10 border-b border-green-500/30 px-4 py-2">

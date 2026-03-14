@@ -104,6 +104,9 @@ export async function POST(request: NextRequest) {
 //    }
 
     // pending 상태 → 관리자에게 이메일 알림 (fire-and-forget)
+    if (data.status === 'pending' && !isSmtpConfigured()) {
+      console.warn('[LicenseRequest] SMTP not configured — admin email notification skipped. Set SMTP_HOST, SMTP_USER, SMTP_PASS env vars.');
+    }
     if (data.status === 'pending' && isSmtpConfigured()) {
       (async () => {
         try {
@@ -114,10 +117,14 @@ export async function POST(request: NextRequest) {
           });
           const adminEmails = admins.map((a: { email: string }) => a.email).filter(Boolean);
           if (adminEmails.length > 0) {
-            await sendLicenseRequestNotifyEmail(adminEmails, {
+            const result = await sendLicenseRequestNotifyEmail(adminEmails, {
               name: userName, email: userEmail, org: userOrg, machineId,
             });
-            console.log('[LicenseRequest] Admin notification sent to:', adminEmails.join(', '));
+            if (result.success) {
+              console.log('[LicenseRequest] Admin notification sent to:', adminEmails.join(', '));
+            } else {
+              console.error('[LicenseRequest] Admin notification FAILED:', result.error);
+            }
           }
         } catch (e) {
           console.error('[LicenseRequest] Admin notification failed:', e);

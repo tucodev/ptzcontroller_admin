@@ -78,7 +78,7 @@ export function LicensePollingProvider({ children }: { children: React.ReactNode
     if (savedId) {
       setPendingRequestId(savedId);
       setLicenseStatus('pending');
-      setLicenseMessage('관리자 승인을 기다리는 중입니다. 다른 페이지로 이동해도 승인 시 자동으로 알려드립니다.');
+      setLicenseMessage('관리자 승인을 기다리는 중입니다. 승인 시 알려드립니다.');
       beginPolling(savedId);
       return;
     }
@@ -195,7 +195,7 @@ export function LicensePollingProvider({ children }: { children: React.ReactNode
     localStorage.removeItem(LS_RESULT_KEY); // 이전 결과 제거
     setPendingRequestId(requestId);
     setLicenseStatus('pending');
-    setLicenseMessage('관리자 승인을 기다리는 중입니다. 다른 페이지로 이동해도 승인 시 자동으로 알려드립니다.');
+    setLicenseMessage('관리자 승인을 기다리는 중입니다. 승인 시 알려드립니다.');
     beginPolling(requestId);
   }, [beginPolling]);
 
