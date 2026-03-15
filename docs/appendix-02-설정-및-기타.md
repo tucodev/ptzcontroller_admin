@@ -78,7 +78,10 @@ SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=cumtyche@gmail.com
 SMTP_PASSWORD=wbjnrgeyonwftrvi
+# app 에 따라 수정
 APP_URL=http://localhost:3000
+#or
+#APP_URL=http://localhost:4000
 
 # sms 정보
 ALIGO_API_KEY=ave4ls1tcjg1m3gpeybp2mnw07zemjmr
