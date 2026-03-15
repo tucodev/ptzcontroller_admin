@@ -17,7 +17,7 @@ export async function GET() {
   try {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, name: true, organization: true, role: true },
+      select: { id: true, email: true, name: true, organization: true, role: true, phone: true },
     });
     if (!user) return NextResponse.json({ error: '사용자를 찾을 수 없습니다' }, { status: 404 });
     return NextResponse.json({ user });
@@ -38,9 +38,10 @@ export async function PATCH(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { name, organization, currentPassword, newPassword } = body as {
+    const { name, organization, phone, currentPassword, newPassword } = body as {
       name?: string;
       organization?: string;
+      phone?: string;
       currentPassword?: string;
       newPassword?: string;
     };
@@ -62,6 +63,9 @@ export async function PATCH(request: NextRequest) {
     if (typeof organization === 'string') {
       updateData.organization = organization.trim();
     }
+    if (typeof phone === 'string') {
+      updateData.phone = phone.replace(/[-\s]/g, '').trim();
+    }
 
     // 비밀번호 변경 요청 처리
     if (newPassword) {
@@ -82,7 +86,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     // name/organization 외 변경할 내용이 없으면 조기 반환
-    const hasProfileChange = 'name' in updateData || 'organization' in updateData;
+    const hasProfileChange = 'name' in updateData || 'organization' in updateData || 'phone' in updateData;
     const hasPasswordChange = 'password' in updateData;
     if (!hasProfileChange && !hasPasswordChange) {
       return NextResponse.json({ error: '변경할 내용이 없습니다' }, { status: 400 });
@@ -91,7 +95,7 @@ export async function PATCH(request: NextRequest) {
     const updated = await prisma.user.update({
       where: { id: userId },
       data: updateData,
-      select: { id: true, email: true, name: true, organization: true, role: true },
+      select: { id: true, email: true, name: true, organization: true, role: true, phone: true },
     });
 
     return NextResponse.json({ success: true, user: updated });

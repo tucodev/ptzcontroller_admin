@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getAllMachineIds } from '@/lib/license';
 import { isSmtpConfigured, sendLicenseRequestNotifyEmail } from '@/lib/email';
+import { isSmsConfigured, getSmsSettings, sendSmsToAdmins } from '@/lib/sms';
 
 export const dynamic = 'force-dynamic';
 
@@ -128,6 +129,27 @@ export async function POST(request: NextRequest) {
           }
         } catch (e) {
           console.error('[LicenseRequest] Admin notification failed:', e);
+        }
+      })();
+    }
+
+    // SMS 알림 (fire-and-forget)
+    if (data.status === 'pending' && isSmsConfigured()) {
+      (async () => {
+        try {
+          const { smsNotifyLicense } = await getSmsSettings();
+          if (smsNotifyLicense) {
+            const result = await sendSmsToAdmins(
+              `[PTZ] 라이선스 요청: ${userName} (${userEmail})`,
+            );
+            if (result.success) {
+              console.log('[LicenseRequest] SMS notification sent');
+            } else {
+              console.error('[LicenseRequest] SMS notification FAILED:', result.error);
+            }
+          }
+        } catch (e) {
+          console.error('[LicenseRequest] SMS notification error:', e);
         }
       })();
     }

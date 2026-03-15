@@ -91,6 +91,8 @@ export interface AppSettings {
   proxyPort: number;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   theme: 'light' | 'dark' | 'system';
+  smsNotifySignup?: boolean;    // 회원가입 시 관리자 SMS 알림
+  smsNotifyLicense?: boolean;   // 라이선스 요청 시 관리자 SMS 알림
 }
 
 export interface UserSession {

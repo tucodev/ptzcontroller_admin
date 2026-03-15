@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { saveOfflineUser } from "@/lib/offline-db";
+import { isSmtpConfigured, sendSignupNotifyEmail } from "@/lib/email";
+import { isSmsConfigured, getSmsSettings, sendSmsToAdmins } from "@/lib/sms";
 
 // seed 계정 — 첫 번째 실제 사용자 판단 시 제외
 const SEED_EMAILS = new Set(["john@doe.com"]);
@@ -97,7 +99,62 @@ export async function POST(request: NextRequest) {
         }
 
         // ───────────────────────────────────────────────────────────
-        // 6단계: 성공 응답
+        // 6단계: 관리자에게 가입 알림 (fire-and-forget)
+        // ───────────────────────────────────────────────────────────
+        if (isSmtpConfigured()) {
+            (async () => {
+                try {
+                    const admins = await prisma.user.findMany({
+                        where: { role: "admin" },
+                        select: { email: true },
+                    });
+                    const adminEmails = admins
+                        .map((a: { email: string }) => a.email)
+                        .filter(Boolean);
+                    if (adminEmails.length > 0) {
+                        const result = await sendSignupNotifyEmail(adminEmails, {
+                            name: name.trim(),
+                            email,
+                            org: organization.trim(),
+                            role,
+                        });
+                        if (result.success) {
+                            console.log("[Signup] Admin notification sent to:", adminEmails.join(", "));
+                        } else {
+                            console.error("[Signup] Admin notification FAILED:", result.error);
+                        }
+                    }
+                } catch (e) {
+                    console.error("[Signup] Admin notification error:", e);
+                }
+            })();
+        }
+
+        // ───────────────────────────────────────────────────────────
+        // 7단계: SMS 알림 (fire-and-forget)
+        // ───────────────────────────────────────────────────────────
+        if (isSmsConfigured()) {
+            (async () => {
+                try {
+                    const { smsNotifySignup } = await getSmsSettings();
+                    if (smsNotifySignup) {
+                        const result = await sendSmsToAdmins(
+                            `[PTZ] 새 사용자 가입: ${name.trim()} (${email})`,
+                        );
+                        if (result.success) {
+                            console.log("[Signup] SMS notification sent");
+                        } else {
+                            console.error("[Signup] SMS notification FAILED:", result.error);
+                        }
+                    }
+                } catch (e) {
+                    console.error("[Signup] SMS notification error:", e);
+                }
+            })();
+        }
+
+        // ───────────────────────────────────────────────────────────
+        // 8단계: 성공 응답
         // ───────────────────────────────────────────────────────────
         return NextResponse.json({
             success: true,

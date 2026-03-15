@@ -199,6 +199,61 @@ export async function sendLicenseRequestNotifyEmail(
     }
 }
 
+// ─── 회원가입 관리자 알림 ────────────────────────────────────────
+
+/** 새 사용자 가입 시 관리자에게 알림 이메일 발송 */
+export async function sendSignupNotifyEmail(
+    adminEmails: string[],
+    newUser: { name: string; email: string; org: string; role: string },
+): Promise<{ success: boolean; error?: string }> {
+    if (adminEmails.length === 0) return { success: true };
+    try {
+        const transporter = createTransporter();
+        const appUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+
+        await transporter.sendMail({
+            from: SMTP_FROM,
+            to: adminEmails.join(","),
+            subject: "[PTZ Controller] 새 사용자 가입",
+            html: `
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+          <h2 style="color: #1a1a2e; margin-bottom: 16px;">새 사용자 가입 알림</h2>
+          <p style="color: #444; line-height: 1.6;">
+            새로운 사용자가 가입했습니다.
+          </p>
+          <div style="background: #f0f4ff; border: 1px solid #d0d8f0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+            <table style="width: 100%; font-size: 14px; color: #333;">
+              <tr><td style="padding: 4px 8px; color: #666;">이름</td><td style="padding: 4px 8px; font-weight: 600;">${newUser.name || '(미입력)'}</td></tr>
+              <tr><td style="padding: 4px 8px; color: #666;">이메일</td><td style="padding: 4px 8px; font-weight: 600;">${newUser.email}</td></tr>
+              <tr><td style="padding: 4px 8px; color: #666;">소속</td><td style="padding: 4px 8px; font-weight: 600;">${newUser.org || '(미입력)'}</td></tr>
+              <tr><td style="padding: 4px 8px; color: #666;">역할</td><td style="padding: 4px 8px;">${newUser.role === 'admin' ? '관리자 (첫 번째 가입자)' : '일반 사용자'}</td></tr>
+              <tr><td style="padding: 4px 8px; color: #666;">가입 시간</td><td style="padding: 4px 8px;">${new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</td></tr>
+            </table>
+          </div>
+          <div style="text-align: center; margin: 28px 0;">
+            <a href="${appUrl}"
+               style="display: inline-block; background: #3b82f6; color: #fff; text-decoration: none;
+                      padding: 12px 32px; border-radius: 8px; font-weight: 600; font-size: 15px;">
+              PTZ Controller 관리
+            </a>
+          </div>
+        </div>
+      `,
+        });
+
+        return { success: true };
+    } catch (err) {
+        console.error("[Email] sendSignupNotifyEmail error:", err);
+        return {
+            success: false,
+            error:
+                err instanceof Error
+                    ? err.message
+                    : "이메일 발송에 실패했습니다.",
+        };
+    }
+}
+
 // ─── 임시 비밀번호 생성 ────────────────────────────────────────
 
 /** 12자 랜덤 비밀번호 (영대소문자 + 숫자 + 특수문자) */

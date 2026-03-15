@@ -53,7 +53,14 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     proxyPort:       9902,
     logLevel:        'info',
     theme:           'system',
+    smsNotifySignup:  false,
+    smsNotifyLicense: false,
   });
+
+  // ── SMS 알림 관련 ──────────────────────────────────────────
+  const [userRole, setUserRole]   = useState<string>('user');
+  const [userPhone, setUserPhone] = useState<string>('');
+  const [smsConfigured, setSmsConfigured] = useState(false);
 
   // ── 라이선스 상태 ─────────────────────────────────────────
   const [lic, setLic] = useState<LicenseState>({
@@ -306,17 +313,31 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   // ── 설정 조회 / 저장 ──────────────────────────────────────
   const fetchSettings = async () => {
     try {
-      const res  = await fetch('/api/config/settings');
-      const data = await res.json();
+      const [settingsRes, profileRes, smsCheckRes] = await Promise.all([
+        fetch('/api/config/settings'),
+        fetch('/api/user/profile'),
+        fetch('/api/config/sms-status'),
+      ]);
+      const data = await settingsRes.json();
       if (data?.settings) {
-        // 실제 적용 중인 테마(currentTheme)를 우선 사용한다.
-        // API가 반환하는 theme은 저장 시점에 따라 기본값 "dark"일 수 있으므로
-        // localStorage/next-themes가 관리하는 currentTheme이 항상 정확하다.
         const activeTheme = (currentTheme as 'light'|'dark'|'system') || data.settings.theme;
-        setSettings({ ...data.settings, theme: activeTheme });
-        // 설정 로드 후 proxy 상태 확인
+        setSettings({
+          ...data.settings,
+          theme: activeTheme,
+          smsNotifySignup: data.settings.smsNotifySignup ?? false,
+          smsNotifyLicense: data.settings.smsNotifyLicense ?? false,
+        });
         checkProxyStatus(data.settings.proxyPort);
       }
+      // 프로필에서 role, phone 가져오기
+      const profileData = await profileRes.json();
+      if (profileData?.user) {
+        setUserRole(profileData.user.role || 'user');
+        setUserPhone(profileData.user.phone || '');
+      }
+      // SMS 설정 가능 여부
+      const smsData = await smsCheckRes.json().catch(() => ({ configured: false }));
+      setSmsConfigured(smsData.configured ?? false);
     } catch (e) {
       console.error('Fetch settings error:', e);
       setProxyStatus('stopped');
@@ -328,6 +349,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const handleSave = async () => {
     setSaving(true);
     try {
+      // 설정 저장
       const res = await fetch('/api/config/settings', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings),
@@ -336,6 +358,14 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
         console.error('Save settings failed:', res.status);
         alert('설정 저장에 실패했습니다. 다시 시도해 주세요.');
         return;
+      }
+      // 전화번호 저장 (admin일 때만)
+      if (userRole === 'admin') {
+        await fetch('/api/user/profile', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: userPhone }),
+        }).catch(() => {});
       }
       onClose();
     } catch (e) {
@@ -772,6 +802,52 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                 </div>
                 {renderLicenseSection()}
               </div>
+
+              {/* ── SMS 알림 섹션 (admin 전용) ──────────────── */}
+              {userRole === 'admin' && (
+                <div className="border-t border-border pt-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Send className="w-4 h-4 text-primary" />
+                    <span className="text-sm font-semibold">SMS 알림 (Aligo)</span>
+                  </div>
+
+                  {!smsConfigured ? (
+                    <p className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-3">
+                      SMS 알림을 사용하려면 환경변수(ALIGO_API_KEY, ALIGO_USER_ID, ALIGO_SENDER)를 설정하세요.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {/* 내 전화번호 */}
+                      <div>
+                        <label className="block text-sm text-muted-foreground mb-1">내 전화번호 (SMS 수신용)</label>
+                        <input type="tel" value={userPhone} placeholder="01012345678"
+                          onChange={e => setUserPhone(e.target.value.replace(/[^0-9-]/g, ''))}
+                          className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg focus:ring-2 focus:ring-primary text-sm" />
+                      </div>
+
+                      {/* 회원가입 알림 토글 */}
+                      <label className="flex items-center justify-between cursor-pointer">
+                        <span className="text-sm">회원가입 시 SMS 알림</span>
+                        <button type="button"
+                          onClick={() => setSettings(prev => ({ ...prev, smsNotifySignup: !prev.smsNotifySignup }))}
+                          className={`relative w-11 h-6 rounded-full transition-colors ${settings.smsNotifySignup ? 'bg-primary' : 'bg-muted'}`}>
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${settings.smsNotifySignup ? 'translate-x-5' : ''}`} />
+                        </button>
+                      </label>
+
+                      {/* 라이선스 요청 알림 토글 */}
+                      <label className="flex items-center justify-between cursor-pointer">
+                        <span className="text-sm">라이선스 요청 시 SMS 알림</span>
+                        <button type="button"
+                          onClick={() => setSettings(prev => ({ ...prev, smsNotifyLicense: !prev.smsNotifyLicense }))}
+                          className={`relative w-11 h-6 rounded-full transition-colors ${settings.smsNotifyLicense ? 'bg-primary' : 'bg-muted'}`}>
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${settings.smsNotifyLicense ? 'translate-x-5' : ''}`} />
+                        </button>
+                      </label>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Save */}
               <div className="flex justify-end gap-3 pt-2">
